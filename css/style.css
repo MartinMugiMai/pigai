@@ -782,3 +782,25 @@ body {
     width: fit-content;
     font-family: 'Segoe UI', 'PingFang SC', sans-serif;
 }
+
+/* ========= 朗诵批改页 ========= */
+.recite-title-row {
+    display: flex;
+    gap: 12px;
+}
+.recite-title-row input { flex: 1; }
+.recite-title-row select {
+    width: 170px;
+    flex: none;
+    cursor: pointer;
+}
+.assess-placeholder {
+    background: #f3ece2;
+    border: 1px dashed #c9b7a4;
+    border-radius: 16px;
+    padding: 12px 18px;
+    font-size: 13px;
+    color: #7a5f48;
+    font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+    line-height: 1.6;
+}

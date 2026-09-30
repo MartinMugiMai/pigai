@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Chinese Learning AI Assistant · 语文学习 AI 助手：作文批改与古诗背诵默写" />
+  <meta name="description" content="Pigai · 语文学习 AI 助手：作文批改与朗诵批改" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
   <title>Chinese Learning AI Assistant</title>
   <link rel="stylesheet" href="css/style.css" />
@@ -30,7 +30,7 @@
     <!-- 顶部选项卡：切换两个功能页面 -->
     <nav class="tab-bar" id="tabBar">
         <button class="tab-btn active" data-view="essay">📝 作文批改 <span class="en">Essay Review</span></button>
-        <button class="tab-btn" data-view="recite">📖 朗诵默写 <span class="en">Recitation</span></button>
+        <button class="tab-btn" data-view="recite">🎙️ 朗诵批改 <span class="en">Recitation Review</span></button>
     </nav>
 
     <!-- ========= 视图一：作文批改（左表单 · 右评语输出） ========= -->
@@ -85,114 +85,82 @@
         </div>
     </section>
 
-    <!-- ========= 视图二：古诗背诵默写 ========= -->
+    <!-- ========= 视图二：朗诵批改 ========= -->
     <section class="view" id="view-recite">
         <div class="panel">
             <div class="panel-header">
-                <h2><span>📖</span> Recitation &amp; Dictation</h2>
-                <div class="sub-badge">Wang Wei · Grade 5</div>
+                <h2><span>🎙️</span> 朗诵批改</h2>
+                <div class="sub-badge">感情 · 读音准确 · 停顿节奏 · 语气</div>
             </div>
 
-            <!-- 语音录制行 -->
+            <!-- 1. 朗诵标题 + 朗读内容类型 -->
+            <div class="entry-item">
+                <label>📝 朗诵标题 <span>Title</span></label>
+                <div class="recite-title-row">
+                    <input type="text" id="reciteTitle" placeholder="例如：九月九日忆山东兄弟 · 王维">
+                    <select id="contentType" title="朗读内容类型">
+                        <option value="古诗" selected>古诗</option>
+                        <option value="词">词</option>
+                        <option value="乐府诗集">乐府诗集</option>
+                        <option value="文言文">文言文</option>
+                        <option value="现代诗">现代诗</option>
+                        <option value="文章">文章</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- 2. 朗读内容（可留空，由 AI 根据标题匹配） -->
+            <div class="entry-item">
+                <label>📜 朗读内容 <span>可选，留空由 AI 匹配</span></label>
+                <textarea id="reciteContent" rows="6" placeholder="粘贴朗读内容的原文；留空则由 AI 根据朗诵标题自动匹配该篇目的标准内容"></textarea>
+            </div>
+
+            <!-- 3. 朗读评价要求（可选） -->
+            <div class="entry-item">
+                <label>🗒️ 朗读评价要求 <span>可选</span></label>
+                <textarea id="reciteReviewReq" rows="2" placeholder="留空则默认评价：感情、读音准确、停顿节奏、语气"></textarea>
+            </div>
+
+            <!-- 4. 朗读录音 -->
             <div class="voice-row">
-                <span class="label">🎙️ Recite</span>
+                <span class="label">🎙️ 朗读录音</span>
                 <div class="recording-indicator">
                     <span class="pulse" id="pulseDot"></span>
-                    <span class="status-text" id="voiceStatus">Click 🎤 to start</span>
+                    <span class="status-text" id="voiceStatus">点击 🎤 开始录音</span>
                 </div>
                 <div class="voice-actions">
-                    <button class="btn btn-voice" id="voiceRecordBtn">🎤 Record</button>
-                    <button class="btn btn-secondary" id="voiceStopBtn" disabled>⏹ Stop</button>
+                    <button class="btn btn-voice" id="voiceRecordBtn">🎤 开始录音</button>
+                    <button class="btn btn-secondary" id="voiceStopBtn" disabled>⏹ 停止</button>
                 </div>
-                <span class="voice-status-detail" id="voiceDetail">⏳ Not recorded</span>
+                <span class="voice-status-detail" id="voiceDetail">⏳ 未录音</span>
             </div>
 
-            <!-- 默写输入 -->
-            <div class="entry-item" style="margin-bottom: 12px;">
-                <label for="writeInput">📝 Dictation <span>逐句输入</span></label>
-                <textarea id="writeInput" rows="3" placeholder="Enter the poem here...">独在异乡为异客，
-每逢佳节倍思亲。
-遥知兄弟登高处，
-遍插茱萸少一人</textarea>
+            <!-- 5. 讯飞语音评测数据占位（suntone 接入后显示读音测评结果） -->
+            <div class="assess-placeholder" id="assessPlaceholder">
+                ⏳ 讯飞语音评测（suntone）：待接入后此处显示读音准确度、流利度、韵律度等实测数据，并自动并入 AI 批改
             </div>
 
-            <!-- 原文及学生默写展示 -->
-            <div class="poem-block">
-                <div class="poem-title">《九月九日忆山东兄弟》 · 王维</div>
-                <div class="poem-content" id="originalPoem">
-                    <span>独在异乡为异客，</span><br>
-                    <span>每逢佳节倍思亲。</span><br>
-                    <span>遥知兄弟登高处，</span><br>
-                    <span class="highlight-error">遍插茱萸少一人。</span>
-                    <span style="font-size: 12px; color: #7a5f48; margin-left: 8px; background: #f0e3d8; padding: 0 12px; border-radius: 30px;">✎ Ref</span>
-                </div>
-                <div class="student-answer">
-                    <div class="label">
-                        ✍️ Student
-                        <i id="fluencyBadge">Fluency ★★★☆</i>
-                    </div>
-                    <div class="answer-text" id="studentDisplay">
-                        独在异乡为异客，<br>
-                        每逢佳节倍思亲。<br>
-                        遥知兄弟登高处，<br>
-                        遍插茱萸少一人
-                    </div>
-                    <div style="margin-top: 10px; font-size: 13px; color: #594734; background: #e7dbcf; padding: 4px 16px; border-radius: 30px; display: inline-block; font-family: 'Segoe UI', sans-serif;" id="reciteMeta">
-                        ⏳ Recited 48s · Smooth rhythm
-                    </div>
-                </div>
+            <!-- 6. 开始批改 -->
+            <div class="action-bar">
+                <button class="btn btn-primary" id="gradeBtn">✨ 开始批改</button>
             </div>
 
             <!-- 分数 & 评语 -->
             <div class="feedback-grid">
                 <div class="score-box">
-                    <div class="score-number" id="scoreDisplay">92</div>
-                    <div class="score-label">⭐ Total</div>
-                    <div style="margin-top: 8px; font-size: 14px; background: #d4c4b3; padding: 2px 16px; border-radius: 30px; color: #2d2016; font-family: 'Segoe UI', sans-serif;" id="gradeLabel">Excellent</div>
+                    <div class="score-number" id="scoreDisplay">--</div>
+                    <div class="score-label">⭐ 总分（满分 100）</div>
+                    <div style="margin-top: 8px; font-size: 14px; background: #d4c4b3; padding: 2px 16px; border-radius: 30px; color: #2d2016; font-family: 'Segoe UI', sans-serif;" id="gradeLabel">待批改</div>
                 </div>
                 <div class="comment-box">
                     <div class="comment-title"><i>📝</i> Teacher's Comment</div>
-                    <div class="comment-text" id="commentDisplay">“默写整体优秀，仅一字笔误。背诵感情饱满，节奏恰当。继续加油！”</div>
-                    <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;" id="tagContainer">
-                        <span style="background: #d1c3b4; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">👍 背诵流畅</span>
-                        <span style="background: #e6d3c0; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">📌 错字1处</span>
-                        <span style="background: #d7cdbe; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">✨ 情感到位</span>
-                    </div>
+                    <div class="comment-text" id="commentDisplay">（填写左侧信息并录音后，点击"✨ 开始批改"，AI 评语将显示在这里）</div>
+                    <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;" id="tagContainer"></div>
                 </div>
             </div>
 
-            <!-- 细节统计 -->
-            <div class="detail-row">
-                <div class="badge-group">
-                    <span class="badge"><span class="num">✔️</span> Correct <strong style="margin-left: 4px; color:#1e3d2a;" id="correctSentences">3/4</strong></span>
-                    <span class="badge"><span class="num">🔤</span> Wrong <strong style="margin-left: 4px; color:#a1452c;" id="wrongCharCount">1</strong></span>
-                    <span class="badge"><span class="num">📖</span> Omitted <strong style="margin-left: 4px; color:#7f613b;" id="omitCount">0</strong></span>
-                </div>
-                <div class="feedback-tip">⚡ Accuracy · Fluency · Emotion</div>
-            </div>
-
-            <!-- 辅助指标 -->
-            <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 6px 0 4px; padding: 8px 0 0 2px;">
-                <div style="display: flex; align-items: center; gap: 6px; background: #f5ede4; padding: 3px 14px 3px 12px; border-radius: 40px;">
-                    <span style="font-weight: 500; font-size: 13px; font-family: 'Segoe UI', sans-serif;">📌 Accuracy</span>
-                    <span style="background: #cbbcaa; padding: 0 10px; border-radius: 40px; font-size: 13px; font-family: 'Segoe UI', sans-serif;" id="accuracyLabel">92%</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 6px; background: #f5ede4; padding: 3px 14px 3px 12px; border-radius: 40px;">
-                    <span style="font-weight: 500; font-size: 13px; font-family: 'Segoe UI', sans-serif;">🎤 Fluency</span>
-                    <span style="background: #cbbcaa; padding: 0 10px; border-radius: 40px; font-size: 13px; font-family: 'Segoe UI', sans-serif;" id="fluencyLabel">A-</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 6px; background: #f5ede4; padding: 3px 14px 3px 12px; border-radius: 40px;">
-                    <span style="font-weight: 500; font-size: 13px; font-family: 'Segoe UI', sans-serif;">💡 Emotion</span>
-                    <span style="background: #cbbcaa; padding: 0 10px; border-radius: 40px; font-size: 13px; font-family: 'Segoe UI', sans-serif;" id="emotionLabel">B+</span>
-                </div>
-            </div>
-
-            <div class="footer-note">
-                <span>🌟 Suggestion: Review "茱萸" character</span>
-                <span>📣 Teacher: Sally · Graded</span>
-            </div>
             <div style="font-size: 12px; color: #a38d79; margin-top: 10px; text-align: center; border-top: 1px dashed #dccfc1; padding-top: 10px; font-family: 'Segoe UI', sans-serif;">
-                ⏳ Recitation &amp; Dictation · Comprehensive Feedback
+                🎙️ 朗诵批改 · 评分 / 评语 / 特征标签由 AI 大模型生成 · 语音评测数据待接入讯飞 suntone
             </div>
         </div>
     </section>

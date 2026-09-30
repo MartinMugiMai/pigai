@@ -304,21 +304,21 @@
         logWindowBtn.style.display = 'none';
     }
 
-    // ==================== 古诗默写批改逻辑 ====================
-    const writeInput = document.getElementById('writeInput');
-    const studentDisplay = document.getElementById('studentDisplay');
-    const fluencyBadge = document.getElementById('fluencyBadge');
+    // ==================== 朗诵批改逻辑（录音 → 大模型批改） ====================
+    // 后续将接入讯飞语音评测（suntone，WebSocket + HMAC 鉴权）：
+    //   录音音频（需转 16k 单声道 lame/speex）分段送讯飞 sent/para 评测，
+    //   得到 overall/pronunciation/tone/fluency/integrity/rhythm/speed 与逐字
+    //   pinyin/tone/readType 数据后并入下方提示词，由大模型综合评价。
+    // 当前版本评测数据为空，大模型基于朗诵标题与朗读内容给出指导性批改。
+    const reciteTitleInput = document.getElementById('reciteTitle');
+    const contentTypeSelect = document.getElementById('contentType');
+    const reciteContentInput = document.getElementById('reciteContent');
+    const reciteReviewReqInput = document.getElementById('reciteReviewReq');
+    const gradeBtn = document.getElementById('gradeBtn');
     const scoreDisplay = document.getElementById('scoreDisplay');
     const gradeLabel = document.getElementById('gradeLabel');
     const commentDisplay = document.getElementById('commentDisplay');
-    const correctSentences = document.getElementById('correctSentences');
-    const wrongCharCount = document.getElementById('wrongCharCount');
-    const omitCount = document.getElementById('omitCount');
-    const accuracyLabel = document.getElementById('accuracyLabel');
-    const fluencyLabel = document.getElementById('fluencyLabel');
-    const emotionLabel = document.getElementById('emotionLabel');
     const tagContainer = document.getElementById('tagContainer');
-    const reciteMeta = document.getElementById('reciteMeta');
 
     const voiceRecordBtn = document.getElementById('voiceRecordBtn');
     const voiceStopBtn = document.getElementById('voiceStopBtn');
@@ -326,28 +326,15 @@
     const voiceDetail = document.getElementById('voiceDetail');
     const pulseDot = document.getElementById('pulseDot');
 
+    const DEFAULT_REVIEW_DIMENSIONS = '感情、读音准确、停顿节奏、语气';
+
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
-    let recordedBlob = null;
+    let recordedBlob = null;      // 录制的朗读音频（后续送讯飞 suntone 评测）
     let recordingStartTime = null;
-
-    const defaultData = {
-        write: '独在异乡为异客，\n每逢佳节倍思亲。\n遥知兄弟登高处，\n遍插茱萸少一人',
-        displayHtml: '独在异乡为异客，<br>每逢佳节倍思亲。<br>遥知兄弟登高处，<br>遍插茱萸少一人',
-        score: '92',
-        grade: 'Excellent',
-        comment: '“默写整体优秀，仅一字笔误。背诵感情饱满，节奏恰当。继续加油！”',
-        correct: '3/4',
-        wrong: '1',
-        omit: '0',
-        accuracy: '92%',
-        fluency: 'A-',
-        emotion: 'B+',
-        tags: ['👍 背诵流畅', '📌 错字1处', '✨ 情感到位'],
-        reciteMeta: '⏳ Recited 48s · Smooth rhythm',
-        fluencyBadgeText: 'Fluency ★★★☆'
-    };
+    let lastRecordingSeconds = 0; // 最近一次录音时长（秒）
+    let isGradingRecite = false;
 
     async function startRecording() {
         try {
@@ -361,33 +348,27 @@
 
             mediaRecorder.onstop = () => {
                 recordedBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                const duration = recordingStartTime ? Math.round((Date.now() - recordingStartTime) / 1000) : 0;
-                voiceDetail.textContent = `✅ Recorded (${duration}s)`;
-                voiceStatus.textContent = '🎤 Done, ready to submit';
+                lastRecordingSeconds = recordingStartTime ? Math.round((Date.now() - recordingStartTime) / 1000) : 0;
+                voiceDetail.textContent = `✅ 已录音（${lastRecordingSeconds}s）`;
+                voiceStatus.textContent = '🎤 录音完成，可开始批改';
                 pulseDot.classList.remove('active');
-                voiceRecordBtn.textContent = '🎤 Re-record';
+                voiceRecordBtn.textContent = '🎤 重新录音';
                 voiceRecordBtn.classList.remove('recording');
                 voiceStopBtn.disabled = true;
-                reciteMeta.textContent = `⏳ Recited ${duration}s · Recorded`;
-                fluencyBadge.textContent = `🎤 Recited ${duration}s`;
-                if (duration > 0) {
-                    let fluencyNote = '';
-                    if (duration < 20) fluencyNote = '⭐ Very fluent';
-                    else if (duration < 40) fluencyNote = '★★★ Fairly fluent';
-                    else fluencyNote = '★★ Some pauses';
-                    fluencyBadge.textContent += ` · ${fluencyNote}`;
-                }
                 stream.getTracks().forEach(track => track.stop());
                 mediaRecorder = null;
+                // TODO(讯飞 suntone)：recordedBlob 需转为 16k 单声道 mp3 后分段送评测，
+                // 评测结果（overall/pronunciation/tone/fluency/integrity/rhythm/speed）
+                // 将并入 buildReciteMessages 的提示词
             };
 
             mediaRecorder.start();
             isRecording = true;
             recordingStartTime = Date.now();
             pulseDot.classList.add('active');
-            voiceStatus.textContent = '🔴 Recording...';
-            voiceDetail.textContent = '⏳ Recording, click Stop';
-            voiceRecordBtn.textContent = '⏺ Recording...';
+            voiceStatus.textContent = '🔴 录音中…';
+            voiceDetail.textContent = '⏳ 录音中，点击 ⏹ 停止结束';
+            voiceRecordBtn.textContent = '⏺ 录音中…';
             voiceRecordBtn.classList.add('recording');
             voiceStopBtn.disabled = false;
             voiceRecordBtn.disabled = true;
@@ -412,7 +393,7 @@
             voiceRecordBtn.disabled = false;
             voiceStopBtn.disabled = true;
             voiceRecordBtn.classList.remove('recording');
-            voiceStatus.textContent = '⏹ Stopped';
+            voiceStatus.textContent = '⏹ 录音已停止';
         } else {
             resetVoiceUI();
         }
@@ -420,7 +401,7 @@
 
     function resetVoiceUI() {
         pulseDot.classList.remove('active');
-        voiceRecordBtn.textContent = '🎤 Record';
+        voiceRecordBtn.textContent = '🎤 开始录音';
         voiceRecordBtn.classList.remove('recording');
         voiceStopBtn.disabled = true;
         voiceRecordBtn.disabled = false;
@@ -430,8 +411,8 @@
             mediaRecorder = null;
         }
         if (!recordedBlob) {
-            voiceStatus.textContent = 'Click 🎤 to start';
-            voiceDetail.textContent = '⏳ Not recorded';
+            voiceStatus.textContent = '点击 🎤 开始录音';
+            voiceDetail.textContent = '⏳ 未录音';
         }
     }
 
@@ -439,6 +420,7 @@
         e.preventDefault();
         if (isRecording) return;
         recordedBlob = null;
+        lastRecordingSeconds = 0;
         startRecording();
     });
 
@@ -447,157 +429,110 @@
         stopRecording();
     });
 
-    function updateFeedback() {
-        let raw = writeInput.value;
-        if (!raw.trim()) {
-            raw = '（未填写默写内容）';
-        }
-        const displayHtml = raw.replace(/\n/g, '<br>');
-        studentDisplay.innerHTML = displayHtml;
-
-        let voiceDuration = 0;
-        const detailText = voiceDetail.textContent;
-        const match = detailText.match(/(\d+)秒/);
-        if (match) voiceDuration = parseInt(match[1], 10);
-
-        const content = raw.trim();
-        const lines = content.split('\n').filter(line => line.trim() !== '');
-        const lineCount = lines.length;
-
-        let wrongCount = 0;
-        if (content.includes('朱')) wrongCount = 1;
-        if (content.includes('茱萸')) wrongCount = 0;
-        if (content.includes('朱萸')) wrongCount = 1;
-        if (content.includes('茱') && !content.includes('茱萸')) wrongCount = 1;
-
-        const standard = '独在异乡为异客，每逢佳节倍思亲。遥知兄弟登高处，遍插茱萸少一人';
-        const stdClean = standard.replace(/[，。、！？\s]/g, '');
-        const inputClean = content.replace(/[，。、！？\s]/g, '');
-        let diffCount = 0;
-        for (let i = 0; i < Math.min(stdClean.length, inputClean.length); i++) {
-            if (stdClean[i] !== inputClean[i]) diffCount++;
-        }
-        diffCount += Math.abs(stdClean.length - inputClean.length);
-        if (diffCount > 0) wrongCount = Math.max(1, diffCount);
-        if (content.includes('遍插茱萸少一人') && content.includes('独在异乡')) {
-            if (diffCount <= 1) wrongCount = 0;
-        }
-        if (content.includes('朱') && !content.includes('茱萸')) wrongCount = 1;
-
-        let omit = 0;
-        if (lineCount < 4) omit = 4 - lineCount;
-        if (content.includes('独在') && content.includes('每逢') && content.includes('遥知') && content.includes('遍插')) {
-            omit = 0;
-        }
-
-        let correct = 4 - omit - (wrongCount > 0 ? 1 : 0);
-        if (correct < 0) correct = 0;
-        const correctStr = `${correct}/4`;
-
-        let score = 100;
-        if (wrongCount > 0) score -= wrongCount * 5;
-        if (omit > 0) score -= omit * 12;
-        if (score < 0) score = 0;
-        if (score > 100) score = 100;
-
-        let grade = 'Excellent';
-        if (score >= 90) grade = 'Excellent';
-        else if (score >= 75) grade = 'Good';
-        else if (score >= 60) grade = 'Pass';
-        else grade = 'Needs Work';
-
-        let comment = 'Overall OK.';
-        if (wrongCount === 0 && omit === 0) comment = '🎉 Perfect! Fluent recitation, great emotion. Keep it up!';
-        else if (wrongCount === 0 && omit > 0) comment = `Accurate, but ${omit} line(s) omitted. Strengthen memory.`;
-        else if (wrongCount > 0 && omit === 0) comment = `${wrongCount} wrong character(s). Pay attention to strokes. Good rhythm.`;
-        else if (wrongCount > 0 && omit > 0) comment = `${wrongCount} wrong, ${omit} omitted. Read more and understand the poem.`;
-        if (content.includes('朱')) comment = '"茱萸" written as "朱萸". Note the grass radical. Otherwise excellent!';
-        if (content.includes('茱萸') && !content.includes('朱')) comment = 'Perfect dictation! Full of emotion. Very well done!';
-        if (content.trim() === '' || content === '（未填写默写内容）') {
-            comment = 'Please enter the dictation content and submit for review.';
-        }
-
-        const tags = [];
-        if (score >= 90) tags.push('🌟 Excellent');
-        else if (score >= 75) tags.push('👍 Good');
-        else tags.push('📖 Keep going');
-        if (wrongCount === 0 && omit === 0) tags.push('✅ Perfect');
-        if (wrongCount > 0) tags.push(`📌 ${wrongCount} wrong`);
-        if (omit > 0) tags.push(`📄 ${omit} omitted`);
-        if (content.includes('茱萸')) tags.push('🌿 Accurate wording');
-
-        scoreDisplay.textContent = score;
-        gradeLabel.textContent = grade;
-        commentDisplay.textContent = comment;
-        correctSentences.textContent = correctStr;
-        wrongCharCount.textContent = wrongCount;
-        omitCount.textContent = omit;
-        accuracyLabel.textContent = `${Math.min(100, Math.round((correct/4)*100))}%`;
-
-        let fluency = 'A';
-        if (score < 60) fluency = 'C';
-        else if (score < 75) fluency = 'B-';
-        else if (score < 90) fluency = 'B+';
-        else fluency = 'A-';
-        if (voiceDuration > 0) {
-            if (voiceDuration < 15) fluency = 'A+';
-            else if (voiceDuration < 30) fluency = 'A';
-            else fluency = 'B+';
-        }
-        fluencyLabel.textContent = fluency;
-
-        let emotion = 'B+';
-        if (score >= 90) emotion = 'A-';
-        else if (score >= 75) emotion = 'B+';
-        else emotion = 'B-';
-        emotionLabel.textContent = emotion;
-
-        tagContainer.innerHTML = tags.map(t =>
-            `<span style="background: #d1c3b4; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">${t}</span>`
-        ).join('');
-
-        if (voiceDuration > 0) {
-            reciteMeta.textContent = `⏳ Recited ${voiceDuration}s · Recorded`;
-            fluencyBadge.textContent = `🎤 Recited ${voiceDuration}s · Fluency ${fluency}`;
-        }
+    // 组装朗诵批改提示词（数字评分满分100 + 30字评语 + 特征标签）
+    function buildReciteMessages(info) {
+        const system = [
+            '你是一位资深的中小学语文朗读指导教师，负责批改学生的朗读。',
+            '请依据提供的信息批改学生的朗读，并严格遵守：',
+            '1. 若"朗读内容"未提供，请根据"朗诵标题"和"内容类型"给出该篇目的标准朗读文本，并以此作为批改依据；',
+            '2. 必须给出数字评分，满分 100 分；',
+            '3. 教师评语控制在 30 字左右；',
+            '4. 评价维度优先参考"评价要求"，未提供时从感情、读音准确、停顿节奏、语气四个维度评价；',
+            '5. 严格按以下格式输出，不要输出格式之外的任何内容：',
+            '评分：整数分数',
+            '评语：约30字的评语',
+            '标签：标签1、标签2、标签3'
+        ].join('\n');
+        const user = [
+            `【朗诵标题】${info.title || '未提供'}`,
+            `【内容类型】${info.type || '未提供'}`,
+            `【朗读内容】${info.content || '（未提供，请根据朗诵标题与内容类型给出标准朗读文本，并以此作为批改依据）'}`,
+            `【评价要求】${info.req}`,
+            info.durationSec > 0 ? `【录音时长】约 ${info.durationSec} 秒` : null,
+            '【语音评测数据】暂缺。讯飞语音评测（suntone）接入后，此处将提供 overall（总分）、pronunciation（发音）、tone（声调）、fluency（流利度）、integrity（完整度）、rhythm（韵律度）、speed（语速）及逐字读音数据，请结合该数据评价读音与节奏。'
+        ].filter(Boolean).join('\n');
+        return [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+        ];
     }
 
-    function resetToDefault() {
-        writeInput.value = defaultData.write;
-        studentDisplay.innerHTML = defaultData.displayHtml;
-        fluencyBadge.textContent = defaultData.fluencyBadgeText;
-        scoreDisplay.textContent = defaultData.score;
-        gradeLabel.textContent = defaultData.grade;
-        commentDisplay.textContent = defaultData.comment;
-        correctSentences.textContent = defaultData.correct;
-        wrongCharCount.textContent = defaultData.wrong;
-        omitCount.textContent = defaultData.omit;
-        accuracyLabel.textContent = defaultData.accuracy;
-        fluencyLabel.textContent = defaultData.fluency;
-        emotionLabel.textContent = defaultData.emotion;
-        reciteMeta.textContent = defaultData.reciteMeta;
-        tagContainer.innerHTML = defaultData.tags.map(t =>
-            `<span style="background: #d1c3b4; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">${t}</span>`
-        ).join('');
-        recordedBlob = null;
-        resetVoiceUI();
-        voiceDetail.textContent = '⏳ Not recorded';
-        voiceStatus.textContent = 'Click 🎤 to start';
+    // 解析大模型回复中的 评分 / 评语 / 标签
+    function parseReciteResult(reply) {
+        const text = String(reply);
+        const scoreM = text.match(/评分[:：]\s*(\d{1,3})/);
+        const commentM = text.match(/评语[:：]\s*(.+)/);
+        const tagsM = text.match(/标签[:：]\s*(.+)/);
+        const tags = tagsM
+            ? tagsM[1].split(/[、,，;；]+/).map(t => t.trim()).filter(Boolean).slice(0, 5)
+            : [];
+        return {
+            score: scoreM ? Math.min(100, parseInt(scoreM[1], 10)) : null,
+            comment: commentM ? commentM[1].trim() : '',
+            tags,
+            raw: text
+        };
     }
 
-    // 注：submitBtn / resetBtn 在当前页面中不存在，保留以便后续扩展
-    document.getElementById('submitBtn')?.addEventListener('click', updateFeedback);
-    document.getElementById('resetBtn')?.addEventListener('click', resetToDefault);
+    function gradeLabelFor(score) {
+        if (score >= 90) return '优秀';
+        if (score >= 80) return '良好';
+        if (score >= 60) return '合格';
+        return '待提高';
+    }
 
-    writeInput.addEventListener('input', function() {
-        const val = this.value;
-        if (val.trim() === '') {
-            studentDisplay.innerHTML = '（Waiting for input...）';
+    function applyReciteResult(parsed) {
+        if (parsed.score !== null) {
+            scoreDisplay.textContent = parsed.score;
+            gradeLabel.textContent = gradeLabelFor(parsed.score);
         } else {
-            studentDisplay.innerHTML = val.replace(/\n/g, '<br>');
+            scoreDisplay.textContent = '--';
+            gradeLabel.textContent = '未获得评分';
         }
-    });
+        commentDisplay.textContent = parsed.comment || parsed.raw.slice(0, 60);
+        const tagStyle = 'background: #d1c3b4; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: \'Segoe UI\', \'PingFang SC\', sans-serif;';
+        tagContainer.innerHTML = parsed.tags.map(t => `<span style="${tagStyle}">${escapeHtml(t)}</span>`).join('');
+    }
 
-    // 初始化古诗模块
-    resetToDefault();
+    async function gradeRecitation() {
+        if (isGradingRecite) return;
+        const info = {
+            title: reciteTitleInput.value.trim(),
+            type: contentTypeSelect.value,
+            content: reciteContentInput.value.trim(),
+            req: reciteReviewReqInput.value.trim() || DEFAULT_REVIEW_DIMENSIONS,
+            durationSec: lastRecordingSeconds
+        };
+        if (!info.title && !info.content) {
+            alert('请至少填写朗诵标题（朗读内容可留空由 AI 自动匹配）');
+            return;
+        }
+        if (!window.chineseAI) {
+            alert('批改功能请在桌面版中运行（项目目录执行 npm start）');
+            return;
+        }
+        isGradingRecite = true;
+        gradeBtn.disabled = true;
+        scoreDisplay.textContent = '…';
+        gradeLabel.textContent = '批改中';
+        commentDisplay.textContent = '⏳ 正在调用大模型批改朗读，请稍候…';
+        tagContainer.innerHTML = '';
+        try {
+            const reply = await window.chineseAI.reviewEssay(buildReciteMessages(info));
+            applyReciteResult(parseReciteResult(reply));
+        } catch (err) {
+            const msg = String(err.message || err);
+            if (msg.includes('API_KEY_NOT_SET') || msg.includes('CUSTOM_URL_NOT_SET')) {
+                openApiSetup();
+                commentDisplay.textContent = '📭 尚未完成 API 配置，请在弹出的设置窗口中完成。';
+            } else {
+                commentDisplay.textContent = '❌ 调用失败：' + msg;
+            }
+        } finally {
+            isGradingRecite = false;
+            gradeBtn.disabled = false;
+        }
+    }
+
+    gradeBtn.addEventListener('click', gradeRecitation);
 })();

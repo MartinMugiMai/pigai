@@ -185,21 +185,50 @@ function createWindow() {
                         console.log('SELFTEST SAVE:', JSON.stringify(saveResult));
                         flush();
                     }
-                    await win.webContents.executeJavaScript(`
-                        document.getElementById('grade').value = '五年级';
-                        document.getElementById('essayContent').value = '清晨的巷口，豆浆店的热气模糊了玻璃窗。这是一段用于自测的短文。';
-                        document.getElementById('generateBtn').click();
-                    `);
-                    for (let i = 0; i < 40; i++) {
-                        await new Promise(r => setTimeout(r, 3000));
-                        const text = await win.webContents.executeJavaScript("document.getElementById('outputContent').innerText");
-                        if (text && !text.includes('正在调用')) {
-                            report.result = text.slice(0, 220);
-                            console.log('SELFTEST RESULT:', text.slice(0, 220).replace(/\n/g, ' | '));
-                            break;
+                    const scope = process.env.APP_SELFTEST_SCOPE || 'essay';
+                    if (scope === 'recite') {
+                        // 朗诵批改链路：填标题/类型/内容 → 开始批改 → 轮询数字评分
+                        await win.webContents.executeJavaScript(`
+                            document.getElementById('reciteTitle').value = '九月九日忆山东兄弟 · 王维';
+                            document.getElementById('contentType').value = '古诗';
+                            document.getElementById('reciteContent').value = '独在异乡为异客，每逢佳节倍思亲。遥知兄弟登高处，遍插茱萸少一人。';
+                            document.getElementById('gradeBtn').click();
+                        `);
+                        for (let i = 0; i < 40; i++) {
+                            await new Promise(r => setTimeout(r, 3000));
+                            const score = await win.webContents.executeJavaScript("document.getElementById('scoreDisplay').textContent");
+                            if (/^\d{1,3}$/.test(score)) {
+                                report.reciteScore = score;
+                                report.reciteComment = await win.webContents.executeJavaScript("document.getElementById('commentDisplay').textContent");
+                                report.reciteTags = await win.webContents.executeJavaScript("document.getElementById('tagContainer').children.length");
+                                console.log('SELFTEST RECITE:', JSON.stringify({ score, comment: report.reciteComment, tags: report.reciteTags }));
+                                break;
+                            }
+                            const c = await win.webContents.executeJavaScript("document.getElementById('commentDisplay').textContent");
+                            if (c.includes('调用失败')) {
+                                report.reciteError = c;
+                                console.log('SELFTEST RECITE ERROR:', c.slice(0, 120));
+                                break;
+                            }
                         }
+                        flush();
+                    } else {
+                        await win.webContents.executeJavaScript(`
+                            document.getElementById('grade').value = '五年级';
+                            document.getElementById('essayContent').value = '清晨的巷口，豆浆店的热气模糊了玻璃窗。这是一段用于自测的短文。';
+                            document.getElementById('generateBtn').click();
+                        `);
+                        for (let i = 0; i < 40; i++) {
+                            await new Promise(r => setTimeout(r, 3000));
+                            const text = await win.webContents.executeJavaScript("document.getElementById('outputContent').innerText");
+                            if (text && !text.includes('正在调用')) {
+                                report.result = text.slice(0, 220);
+                                console.log('SELFTEST RESULT:', text.slice(0, 220).replace(/\n/g, ' | '));
+                                break;
+                            }
+                        }
+                        flush();
                     }
-                    flush();
                     // 请求日志窗口：点击主页面按钮后应弹出独立日志窗口
                     await win.webContents.executeJavaScript("document.getElementById('logWindowBtn').click()");
                     await new Promise(r => setTimeout(r, 2500));

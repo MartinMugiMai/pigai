@@ -1,16 +1,16 @@
 # Pigai · 语文学习 AI 助手
 ## 提交代码请先建立新分支，由于AI编程的不确定性，请勿直接对main主线提交。
 
-（Chinese Learning AI Assistant）作文批改（GLM 大模型）+ 古诗背诵默写，支持 **Windows 与 macOS（最低 macOS 12 Monterey）** 的 Electron 桌面应用；页面部分为纯静态 HTML/CSS/JS，也可在浏览器中预览。
+（Chinese Learning AI Assistant）作文批改（GLM 大模型）+ 朗诵批改（录音 + 大模型评分评语，语音评测数据后续接入讯飞 suntone），支持 **Windows 与 macOS（最低 macOS 12 Monterey）** 的 Electron 桌面应用；页面部分为纯静态 HTML/CSS/JS，也可在浏览器中预览。
 
 ## 项目结构
 
 ```
 pigai/
-├── index.html            页面入口（选项卡切换：作文批改 / 朗诵默写）
+├── index.html            页面入口（选项卡切换：作文批改 / 朗诵批改）
 ├── log.html              请求日志窗口页面
 ├── css/style.css         样式（卷轴主题 + 选项卡）
-├── js/main.js            渲染层脚本（表单、选项卡、默写逻辑、IPC 调用）
+├── js/main.js            渲染层脚本（表单、选项卡、批改逻辑、IPC 调用）
 ├── js/log.js             日志窗口脚本（渲染日志、保存 TXT）
 ├── electron/main.js      Electron 主进程（窗口、麦克风权限、GLM IPC 代理、日志）
 ├── electron/preload.js   预加载脚本（contextBridge 暴露受控调用入口）
@@ -50,6 +50,12 @@ npm run dist:mac    # 仅 macOS（dmg）
 
 > 从本项目旧版本（Key 写死在代码里）升级的用户：请在智谱控制台轮换新 Key，并改用上述方式配置。
 
+## 功能说明
+
+- **顶部选项卡**：点击 "📝 作文批改" / "🎙️ 朗诵批改" 在两个功能页面之间切换，当前选项卡高亮显示。
+- **作文批改页**：填写年级、作文题目、最低字数、学生写作要求、教师批改需求并导入作文（.txt 或粘贴），点击 ✨ Generate Review / Ctrl+Enter 调用大模型生成批改；🗑️ Clear 一键清空。
+- **朗诵批改页**：填写朗诵标题、内容类型（古诗/词/乐府诗集/文言文/现代诗/文章）、朗读内容（可留空由 AI 按标题匹配）与可选的朗读评价要求（留空默认：感情、读音准确、停顿节奏、语气），🎤 录音后点击 **✨ 开始批改**，大模型输出 100 分制数字评分、约 30 字教师评语与朗读特征标签（如"背诵流畅""感情饱满""读音有待完善"）；讯飞语音评测（suntone）接入后读音测评数据将自动并入批改。
+
 ## 关键设计
 
 - **GLM 接口在主进程**：API Key 与网络请求全部位于 `electron/main.js`（`net.fetch`，无 CORS 限制），渲染层通过 preload 暴露的 `window.chineseAI.reviewEssay()` 走 IPC 调用，`js/main.js` 中不含任何密钥。当前模型为免费档 `glm-5.3-flash`（推理模型，生成需数秒到数十秒）。
@@ -59,7 +65,7 @@ npm run dist:mac    # 仅 macOS（dmg）
 
 ## 浏览器预览模式
 
-直接双击 `index.html` 或用本地服务器打开均可浏览页面，选项卡切换、默写回显等功能正常；**作文批改需要 Electron 环境**（无 `window.chineseAI` 时点击生成会给出明确提示）。
+直接双击 `index.html` 或用本地服务器打开均可浏览页面，选项卡切换等功能正常；**作文批改与朗诵批改需要 Electron 环境**（无 `window.chineseAI` 时点击生成会给出明确提示）。
 
 ## 安全提醒
 
