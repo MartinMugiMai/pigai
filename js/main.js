@@ -112,6 +112,37 @@
         if (window.chineseAI) window.chineseAI.openRecordingsFolder();
     });
 
+    // 上传音频文件（mp3/aac/m4a/wav）：与录音同等对待
+    // - mp3 直接送讯飞；其他格式按录音同路重采样转 16k MP3
+    // - 文件自动存入录音目录，时长由解码结果计算
+    audioUploadBtn.addEventListener('click', () => audioFileInput.click());
+    audioFileInput.addEventListener('change', async function() {
+        const file = this.files && this.files[0];
+        this.value = ''; // 允许重复选择同一文件
+        if (!file) return;
+        try {
+            voiceStatus.textContent = '⏳ 正在读取音频文件…';
+            const arrayBuf = await file.arrayBuffer();
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            let decoded;
+            try {
+                decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+            } finally {
+                ctx.close();
+            }
+            lastRecordingSeconds = Math.round(decoded.duration);
+            recordedBlob = new Blob([arrayBuf], { type: file.type || 'audio/mpeg' });
+            pulseDot.classList.remove('active');
+            voiceRecordBtn.textContent = '🎤 重新录音';
+            voiceStatus.textContent = '🎵 音频已导入，可开始批改';
+            voiceDetail.textContent = `✅ 已导入：${file.name}（${lastRecordingSeconds}s）`;
+            saveRecordingToDisk(recordedBlob, file.name.replace(/\.[^.]+$/, ''));
+        } catch (e) {
+            voiceStatus.textContent = '❌ 音频读取失败';
+            alert('无法读取该音频文件：' + (e.message || e) + '。请使用 mp3 / aac / m4a / wav 格式。');
+        }
+    });
+
     apiSettingsBtn.addEventListener('click', openApiSetup);
     apiCancelBtn.addEventListener('click', closeApiSetup);
     apiTypeSelect.addEventListener('change', toggleCustomFields);
@@ -340,6 +371,8 @@
 
     const voiceRecordBtn = document.getElementById('voiceRecordBtn');
     const voiceStopBtn = document.getElementById('voiceStopBtn');
+    const audioUploadBtn = document.getElementById('audioUploadBtn');
+    const audioFileInput = document.getElementById('audioFileInput');
     const voiceStatus = document.getElementById('voiceStatus');
     const voiceDetail = document.getElementById('voiceDetail');
     const pulseDot = document.getElementById('pulseDot');
@@ -457,15 +490,17 @@
         });
     }
 
-    // 录音停止后自动保存到用户数据目录的 recordings 文件夹
-    async function saveRecordingToDisk(blob) {
+    // 录音/导入音频后自动保存到用户数据目录的 recordings 文件夹
+    async function saveRecordingToDisk(blob, namePart) {
         try {
             if (!window.chineseAI || !window.chineseAI.saveRecording) return;
             const now = new Date();
             const p2 = n => String(n).padStart(2, '0');
             const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
-            const titlePart = reciteTitleInput.value.trim().replace(/[\\/:*?"<>|]/g, '').slice(0, 20);
-            const filename = (titlePart ? `录音-${titlePart}-` : '录音-') + stamp + '.webm';
+            const title = namePart || reciteTitleInput.value.trim();
+            const cleanTitle = title.replace(/[\\/:*?"<>|]/g, '').slice(0, 20);
+            const ext = (blob.type || '').includes('mpeg') ? 'mp3' : 'webm';
+            const filename = (cleanTitle ? `录音-${cleanTitle}-` : '录音-') + stamp + '.' + ext;
             const base64 = await blobToBase64(blob);
             const r = await window.chineseAI.saveRecording({ base64, filename });
             if (!r.ok) console.error('录音保存失败');
@@ -648,14 +683,14 @@
         gradeLabel.textContent = '批改中';
         tagContainer.innerHTML = '';
 
-        // 第一步：讯飞语音评测（已录音 + 已配置 + 有参考文本时执行）
+        // 第一步：讯飞语音评测（有音频 + 已配置 + 有参考文本时执行）
         let assessSummary = null;
         let assessNote = '';
         try {
             if (!recordedBlob) {
                 assessNote = '本次未提供录音音频';
                 assessPlaceholder.classList.remove('error');
-                assessPlaceholder.textContent = '⏳ 未检测到录音：本次批改不含读音测评数据（讯飞评测已就绪，录音后自动评测）';
+                assessPlaceholder.textContent = '⏳ 未检测到录音：本次批改不含读音测评数据（讯飞评测已就绪，录音或上传音频后自动评测）';
             } else if (!info.content) {
                 assessNote = '朗读内容为空（AI 自动匹配），无参考文本可评测';
                 assessPlaceholder.classList.remove('error');
