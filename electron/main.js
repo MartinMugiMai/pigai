@@ -283,6 +283,13 @@ function createWindow() {
                     report.mic = micResult;
                     console.log('SELFTEST MIC:', micResult);
                     flush();
+                    // APP_SELFTEST_EXIT=1：自测完成后关闭主窗口（此时日志窗口开着），
+                    // 用于验证"关主窗口同步关子窗口"——进程应整体退出
+                    if (process.env.APP_SELFTEST_EXIT === '1') {
+                        report.closingMain = true;
+                        flush();
+                        setTimeout(() => win.close(), 500);
+                    }
                 } catch (e) {
                     report.error = e.message;
                     console.log('SELFTEST RESULT: ERROR ' + e.message);
@@ -291,6 +298,11 @@ function createWindow() {
             }, 1500);
         });
     }
+    // 主窗口关闭 = 应用退出：同步关闭日志等子窗口（否则子窗口会悬空保活进程）
+    win.on('closed', () => {
+        if (logWin && !logWin.isDestroyed()) logWin.close();
+        app.quit();
+    });
     return win;
 }
 
