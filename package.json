@@ -10,7 +10,9 @@
     "start": "electron .",
     "dist": "electron-builder --win --mac",
     "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac",
+    "dist:mac:x64": "electron-builder --mac --x64",
+    "dist:mac:arm64": "electron-builder --mac --arm64"
   },
   "devDependencies": {
     "electron": "^43.0.0",
