@@ -112,37 +112,6 @@
         if (window.chineseAI) window.chineseAI.openRecordingsFolder();
     });
 
-    // 上传音频文件（mp3/aac/m4a/wav）：与录音同等对待
-    // - mp3 直接送讯飞；其他格式按录音同路重采样转 16k MP3
-    // - 文件自动存入录音目录，时长由解码结果计算
-    audioUploadBtn.addEventListener('click', () => audioFileInput.click());
-    audioFileInput.addEventListener('change', async function() {
-        const file = this.files && this.files[0];
-        this.value = ''; // 允许重复选择同一文件
-        if (!file) return;
-        try {
-            voiceStatus.textContent = '⏳ 正在读取音频文件…';
-            const arrayBuf = await file.arrayBuffer();
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            let decoded;
-            try {
-                decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
-            } finally {
-                ctx.close();
-            }
-            lastRecordingSeconds = Math.round(decoded.duration);
-            recordedBlob = new Blob([arrayBuf], { type: file.type || 'audio/mpeg' });
-            pulseDot.classList.remove('active');
-            voiceRecordBtn.textContent = '🎤 重新录音';
-            voiceStatus.textContent = '🎵 音频已导入，可开始批改';
-            voiceDetail.textContent = `✅ 已导入：${file.name}（${lastRecordingSeconds}s）`;
-            saveRecordingToDisk(recordedBlob, file.name.replace(/\.[^.]+$/, ''));
-        } catch (e) {
-            voiceStatus.textContent = '❌ 音频读取失败';
-            alert('无法读取该音频文件：' + (e.message || e) + '。请使用 mp3 / aac / m4a / wav 格式。');
-        }
-    });
-
     apiSettingsBtn.addEventListener('click', openApiSetup);
     apiCancelBtn.addEventListener('click', closeApiSetup);
     apiTypeSelect.addEventListener('change', toggleCustomFields);
@@ -479,6 +448,37 @@
     voiceStopBtn.addEventListener('click', function(e) {
         e.preventDefault();
         stopRecording();
+    });
+
+    // 上传音频文件（mp3/aac/m4a/wav）：与录音同等对待
+    // - mp3 直接送讯飞；其他格式按录音同路重采样转 16k MP3
+    // - 文件自动存入录音目录，时长由解码结果计算
+    audioUploadBtn.addEventListener('click', () => audioFileInput.click());
+    audioFileInput.addEventListener('change', async function() {
+        const file = this.files && this.files[0];
+        this.value = ''; // 允许重复选择同一文件
+        if (!file) return;
+        try {
+            voiceStatus.textContent = '⏳ 正在读取音频文件…';
+            const arrayBuf = await file.arrayBuffer();
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            let decoded;
+            try {
+                decoded = await ctx.decodeAudioData(arrayBuf.slice(0));
+            } finally {
+                ctx.close();
+            }
+            lastRecordingSeconds = Math.round(decoded.duration);
+            recordedBlob = new Blob([arrayBuf], { type: file.type || 'audio/mpeg' });
+            pulseDot.classList.remove('active');
+            voiceRecordBtn.textContent = '🎤 重新录音';
+            voiceStatus.textContent = '🎵 音频已导入，可开始批改';
+            voiceDetail.textContent = `✅ 已导入：${file.name}（${lastRecordingSeconds}s）`;
+            saveRecordingToDisk(recordedBlob, file.name.replace(/\.[^.]+$/, ''));
+        } catch (e) {
+            voiceStatus.textContent = '❌ 音频读取失败';
+            alert('无法读取该音频文件：' + (e.message || e) + '。请使用 mp3 / aac / m4a / wav 格式。');
+        }
     });
 
     function blobToBase64(blob) {
