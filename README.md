@@ -1,4 +1,5 @@
 # Pigai · 语文学习 AI 助手
+## 提交代码请先建立新分支，由于AI编程的不确定性，请勿直接对main主线提交。
 
 （Chinese Learning AI Assistant）作文批改（GLM 大模型）+ 古诗背诵默写，支持 **Windows 与 macOS（最低 macOS 12 Monterey）** 的 Electron 桌面应用；页面部分为纯静态 HTML/CSS/JS，也可在浏览器中预览。
 
