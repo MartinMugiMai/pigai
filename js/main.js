@@ -450,8 +450,8 @@
         stopRecording();
     });
 
-    // 上传音频文件（mp3/aac/m4a/wav）：与录音同等对待
-    // - mp3 直接送讯飞；其他格式按录音同路重采样转 16k MP3
+    // 上传音频文件（mp3/aac/m4a/wav/webm）：与录音同等对待
+    // - mp3/webm 直接送讯飞；其他格式按录音同路重采样转 16k MP3
     // - 文件自动存入录音目录，时长由解码结果计算
     audioUploadBtn.addEventListener('click', () => audioFileInput.click());
     audioFileInput.addEventListener('change', async function() {
@@ -477,7 +477,7 @@
             saveRecordingToDisk(recordedBlob, file.name.replace(/\.[^.]+$/, ''));
         } catch (e) {
             voiceStatus.textContent = '❌ 音频读取失败';
-            alert('无法读取该音频文件：' + (e.message || e) + '。请使用 mp3 / aac / m4a / wav 格式。');
+            alert('无法读取该音频文件：' + (e.message || e) + '。请使用 mp3 / aac / m4a / wav / webm 格式。');
         }
     });
 
