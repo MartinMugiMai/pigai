@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Chinese Learning AI Assistant · 语文学习 AI 助手：作文批改与古诗背诵默写" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+  <title>Chinese Learning AI Assistant</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div class="scroll-container">
+
+    <!-- 主标题栏 · 英文 -->
+    <div class="main-title-bar">
+        <div class="main-title">
+            <span>Chinese Learning AI Assistant</span>
+            <span class="seal">语文</span>
+            <span class="en-sub">Six-Dimension &amp; Recitation</span>
+        </div>
+        <div class="title-meta">
+            <span>📅 2026.09.02</span>
+            <span>👤 Sally</span>
+            <button type="button" class="api-settings-btn" id="apiSettingsBtn" title="配置 API Key 与接口地址">⚙️ API 设置</button>
+        </div>
+    </div>
+
+    <!-- 顶部选项卡：切换两个功能页面 -->
+    <nav class="tab-bar" id="tabBar">
+        <button class="tab-btn active" data-view="essay">📝 作文批改 <span class="en">Essay Review</span></button>
+        <button class="tab-btn" data-view="recite">📖 朗诵默写 <span class="en">Recitation</span></button>
+    </nav>
+
+    <!-- ========= 视图一：作文批改（左表单 · 右评语输出） ========= -->
+    <section class="view active" id="view-essay">
+        <div class="panel">
+            <div class="essay-layout">
+                <!-- 左：批改条件输入 -->
+                <div class="essay-form">
+                    <div class="entry-item">
+                        <label>🎓 年级 <span>Grade</span></label>
+                        <input type="text" id="grade" placeholder="例如：五年级">
+                    </div>
+                    <div class="entry-item">
+                        <label>📖 作文题目 <span>Title</span></label>
+                        <textarea id="essayTitle" rows="2" placeholder="例如：难忘的一天"></textarea>
+                    </div>
+                    <div class="entry-item">
+                        <label>📏 最低字数 <span>Min Words</span></label>
+                        <input type="number" id="minWords" placeholder="例如：600" min="0">
+                    </div>
+                    <div class="entry-item">
+                        <label>🗒️ 学生写作要求 <span>Requirements</span></label>
+                        <textarea id="writingReq" rows="2" placeholder="例如：结合自身经历，写出真情实感"></textarea>
+                    </div>
+                    <div class="entry-item">
+                        <label>🧑‍🏫 教师批改需求 <span>Review Focus</span></label>
+                        <textarea id="reviewNeeds" rows="2" placeholder="例如：重点点评细节描写与结构安排"></textarea>
+                    </div>
+                    <div class="entry-item">
+                        <label>📥 学生作文导入 <span>Essay</span></label>
+                        <div class="upload-row">
+                            <button type="button" class="btn btn-secondary" id="uploadBtn">📎 上传作文文件</button>
+                            <input type="file" id="essayFile" accept=".txt,.md,text/plain" hidden />
+                            <span class="file-hint" id="fileHint">支持 .txt 文本文件，或直接在下方粘贴</span>
+                        </div>
+                        <textarea id="essayContent" rows="9" placeholder="在此粘贴或导入学生作文原文…"></textarea>
+                    </div>
+                </div>
+
+                <!-- 右：作文评价内容输出 -->
+                <div class="essay-output-col">
+                    <div class="output-area" id="outputContent">
+                        <p class="output-placeholder">✏️ 填写左侧批改条件后，点击 "✨ Generate Review" 或按 Ctrl+Enter 生成评语。</p>
+                    </div>
+                    <div class="action-bar">
+                        <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>
+                        <button class="btn btn-primary" id="generateBtn">✨ Generate Review</button>
+                    </div>
+                    <div class="output-hint">💡 评语基于左侧批改条件生成</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========= 视图二：古诗背诵默写 ========= -->
+    <section class="view" id="view-recite">
+        <div class="panel">
+            <div class="panel-header">
+                <h2><span>📖</span> Recitation &amp; Dictation</h2>
+                <div class="sub-badge">Wang Wei · Grade 5</div>
+            </div>
+
+            <!-- 语音录制行 -->
+            <div class="voice-row">
+                <span class="label">🎙️ Recite</span>
+                <div class="recording-indicator">
+                    <span class="pulse" id="pulseDot"></span>
+                    <span class="status-text" id="voiceStatus">Click 🎤 to start</span>
+                </div>
+                <div class="voice-actions">
+                    <button class="btn btn-voice" id="voiceRecordBtn">🎤 Record</button>
+                    <button class="btn btn-secondary" id="voiceStopBtn" disabled>⏹ Stop</button>
+                </div>
+                <span class="voice-status-detail" id="voiceDetail">⏳ Not recorded</span>
+            </div>
+
+            <!-- 默写输入 -->
+            <div class="entry-item" style="margin-bottom: 12px;">
+                <label for="writeInput">📝 Dictation <span>逐句输入</span></label>
+                <textarea id="writeInput" rows="3" placeholder="Enter the poem here...">独在异乡为异客，
+每逢佳节倍思亲。
+遥知兄弟登高处，
+遍插茱萸少一人</textarea>
+            </div>
+
+            <!-- 原文及学生默写展示 -->
+            <div class="poem-block">
+                <div class="poem-title">《九月九日忆山东兄弟》 · 王维</div>
+                <div class="poem-content" id="originalPoem">
+                    <span>独在异乡为异客，</span><br>
+                    <span>每逢佳节倍思亲。</span><br>
+                    <span>遥知兄弟登高处，</span><br>
+                    <span class="highlight-error">遍插茱萸少一人。</span>
+                    <span style="font-size: 12px; color: #7a5f48; margin-left: 8px; background: #f0e3d8; padding: 0 12px; border-radius: 30px;">✎ Ref</span>
+                </div>
+                <div class="student-answer">
+                    <div class="label">
+                        ✍️ Student
+                        <i id="fluencyBadge">Fluency ★★★☆</i>
+                    </div>
+                    <div class="answer-text" id="studentDisplay">
+                        独在异乡为异客，<br>
+                        每逢佳节倍思亲。<br>
+                        遥知兄弟登高处，<br>
+                        遍插茱萸少一人
+                    </div>
+                    <div style="margin-top: 10px; font-size: 13px; color: #594734; background: #e7dbcf; padding: 4px 16px; border-radius: 30px; display: inline-block; font-family: 'Segoe UI', sans-serif;" id="reciteMeta">
+                        ⏳ Recited 48s · Smooth rhythm
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分数 & 评语 -->
+            <div class="feedback-grid">
+                <div class="score-box">
+                    <div class="score-number" id="scoreDisplay">92</div>
+                    <div class="score-label">⭐ Total</div>
+                    <div style="margin-top: 8px; font-size: 14px; background: #d4c4b3; padding: 2px 16px; border-radius: 30px; color: #2d2016; font-family: 'Segoe UI', sans-serif;" id="gradeLabel">Excellent</div>
+                </div>
+                <div class="comment-box">
+                    <div class="comment-title"><i>📝</i> Teacher's Comment</div>
+                    <div class="comment-text" id="commentDisplay">“默写整体优秀，仅一字笔误。背诵感情饱满，节奏恰当。继续加油！”</div>
+                    <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;" id="tagContainer">
+                        <span style="background: #d1c3b4; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">👍 背诵流畅</span>
+                        <span style="background: #e6d3c0; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">📌 错字1处</span>
+                        <span style="background: #d7cdbe; padding: 2px 16px; border-radius: 30px; font-size: 12px; font-family: 'Segoe UI', sans-serif;">✨ 情感到位</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 细节统计 -->
+            <div class="detail-row">
+                <div class="badge-group">
+                    <span class="badge"><span class="num">✔️</span> Correct <strong style="margin-left: 4px; color:#1e3d2a;" id="correctSentences">3/4</strong></span>
+                    <span class="badge"><span class="num">🔤</span> Wrong <strong style="margin-left: 4px; color:#a1452c;" id="wrongCharCount">1</strong></span>
+                    <span class="badge"><span class="num">📖</span> Omitted <strong style="margin-left: 4px; color:#7f613b;" id="omitCount">0</strong></span>
+                </div>
+                <div class="feedback-tip">⚡ Accuracy · Fluency · Emotion</div>
+            </div>
+
+            <!-- 辅助指标 -->
+            <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 6px 0 4px; padding: 8px 0 0 2px;">
+                <div style="display: flex; align-items: center; gap: 6px; background: #f5ede4; padding: 3px 14px 3px 12px; border-radius: 40px;">
+                    <span style="font-weight: 500; font-size: 13px; font-family: 'Segoe UI', sans-serif;">📌 Accuracy</span>
+                    <span style="background: #cbbcaa; padding: 0 10px; border-radius: 40px; font-size: 13px; font-family: 'Segoe UI', sans-serif;" id="accuracyLabel">92%</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; background: #f5ede4; padding: 3px 14px 3px 12px; border-radius: 40px;">
+                    <span style="font-weight: 500; font-size: 13px; font-family: 'Segoe UI', sans-serif;">🎤 Fluency</span>
+                    <span style="background: #cbbcaa; padding: 0 10px; border-radius: 40px; font-size: 13px; font-family: 'Segoe UI', sans-serif;" id="fluencyLabel">A-</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; background: #f5ede4; padding: 3px 14px 3px 12px; border-radius: 40px;">
+                    <span style="font-weight: 500; font-size: 13px; font-family: 'Segoe UI', sans-serif;">💡 Emotion</span>
+                    <span style="background: #cbbcaa; padding: 0 10px; border-radius: 40px; font-size: 13px; font-family: 'Segoe UI', sans-serif;" id="emotionLabel">B+</span>
+                </div>
+            </div>
+
+            <div class="footer-note">
+                <span>🌟 Suggestion: Review "茱萸" character</span>
+                <span>📣 Teacher: Sally · Graded</span>
+            </div>
+            <div style="font-size: 12px; color: #a38d79; margin-top: 10px; text-align: center; border-top: 1px dashed #dccfc1; padding-top: 10px; font-family: 'Segoe UI', sans-serif;">
+                ⏳ Recitation &amp; Dictation · Comprehensive Feedback
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- API 设置弹窗（首次运行自动弹出；右上角 ⚙️ API 设置 可随时打开） -->
+<div class="modal-overlay" id="apiSetupOverlay">
+    <div class="modal-dialog">
+        <div class="modal-title">⚙️ API 设置</div>
+        <div class="modal-body">
+            <div class="entry-item">
+                <label>API 类型 <span>Provider</span></label>
+                <select id="apiTypeSelect">
+                    <option value="glm">GLM 官方 · glm-5.3-flash（默认）</option>
+                    <option value="custom">自定义接口（OpenAI 兼容）</option>
+                </select>
+            </div>
+            <div class="entry-item">
+                <label>API Key <span>必填</span></label>
+                <input type="password" id="apiKeyInput" placeholder="粘贴你的 API Key" autocomplete="off">
+                <div class="upload-row">
+                    <button type="button" class="btn btn-secondary" id="importKeyBtn">📥 导入 key.txt</button>
+                    <input type="file" id="keyFileInput" accept=".txt,text/plain" hidden />
+                    <span class="file-hint" id="keyFileHint">支持智谱 key.txt 或纯文本 Key</span>
+                </div>
+                <div class="key-mask" id="keyMask" style="display: none;"></div>
+            </div>
+            <div class="entry-item" id="customUrlItem" style="display: none;">
+                <label>API 链接 <span>必填</span></label>
+                <input type="text" id="customUrlInput" placeholder="例如：https://api.deepseek.com/v1/chat/completions">
+            </div>
+            <div class="entry-item" id="customModelItem" style="display: none;">
+                <label>模型名称 <span>可选</span></label>
+                <input type="text" id="customModelInput" placeholder="默认 glm-5.3-flash">
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="apiCancelBtn">取消</button>
+            <button type="button" class="btn btn-primary" id="apiSaveBtn">保存</button>
+        </div>
+    </div>
+</div>
+
+<script src="js/main.js"></script>
+</body>
+</html>

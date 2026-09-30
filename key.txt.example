@@ -1,0 +1,5 @@
+把你的 API Key 粘贴到下面（替换本行全部内容），然后将本文件重命名为 key.txt
+重命名后的 key.txt 已被 .gitignore 忽略，不会被提交到仓库
+也可以在应用"⚙️ API 设置"弹窗中直接点击"导入 key.txt"，程序会自动识别 Key
+
+KEY：在这里粘贴你的APIKey

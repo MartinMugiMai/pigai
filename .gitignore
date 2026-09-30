@@ -1,0 +1,25 @@
+# ===== 依赖与构建产物 =====
+node_modules/
+dist/
+build/
+release/
+.vite/
+
+# ===== 编辑器与 IDE =====
+.vscode/
+.idea/
+*.swp
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ===== 密钥文件（绝不入库）=====
+key.txt
+*.key
+
+# ===== 日志与临时文件 =====
+*.log
+*.tmp
+*~
