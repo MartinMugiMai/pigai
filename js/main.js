@@ -595,7 +595,7 @@
         const system = [
             '你是一位资深的中小学语文朗读指导教师，负责批改学生的朗读。',
             '请依据提供的信息批改学生的朗读，并严格遵守：',
-            '1. 若"朗读内容"未提供，请根据"朗诵标题"和"内容类型"给出该篇目的标准朗读文本，并以此作为批改依据；',
+            '1. "朗读内容"为学生朗读的原文范本，请以此作为批改依据；',
             '2. 必须给出数字评分，满分 100 分；',
             '3. 教师评语控制在 30 字左右；',
             '4. 评价维度优先参考"评价要求"，未提供时从感情、读音准确、停顿节奏、语气四个维度评价；',
@@ -607,12 +607,12 @@
         const user = [
             `【朗诵标题】${info.title || '未提供'}`,
             `【内容类型】${info.type || '未提供'}`,
-            `【朗读内容】${info.content || '（未提供，请根据朗诵标题与内容类型给出标准朗读文本，并以此作为批改依据）'}`,
+            `【朗读内容】${info.content}`,
             `【评价要求】${info.req}`,
             info.durationSec > 0 ? `【录音时长】约 ${info.durationSec} 秒` : null,
             assessSummary
                 ? `【语音评测数据】（讯飞 suntone 实测）${JSON.stringify(assessSummary)}\n请务必结合以上读音测评数据评价读音准确度、流利度与韵律，并在评语中体现明显问题。`
-                : `【语音评测数据】暂缺（${assessNote || '未提供录音'}）。请基于朗诵标题与朗读内容进行指导性评价。`
+                : `【语音评测数据】暂缺（${assessNote || '未提供录音'}）。请基于朗读内容进行指导性评价。`
         ].filter(Boolean).join('\n');
         return [
             { role: 'system', content: system },
@@ -741,6 +741,12 @@
         tagContainer.innerHTML = parsed.tags.map(t => `<span style="${tagStyle}">${escapeHtml(t)}</span>`).join('');
     }
 
+    // 朗读内容为必填（讯飞语音测评需参照原文）：空白时批改按钮禁用
+    function updateGradeBtnState() {
+        gradeBtn.disabled = isGradingRecite || reciteContentInput.value.trim() === '';
+        gradeBtn.title = reciteContentInput.value.trim() === '' ? '请先填写朗读内容' : '';
+    }
+
     async function gradeRecitation() {
         if (isGradingRecite) return;
         const info = {
@@ -750,8 +756,9 @@
             req: reciteReviewReqInput.value.trim() || DEFAULT_REVIEW_DIMENSIONS,
             durationSec: lastRecordingSeconds
         };
-        if (!info.title && !info.content) {
-            alert('请至少填写朗诵标题（朗读内容可留空由 AI 自动匹配）');
+        if (!info.content) {
+            alert('请先填写朗读内容（必填，作为语音测评范本）');
+            updateGradeBtnState();
             return;
         }
         if (!window.chineseAI) {
@@ -764,7 +771,7 @@
         gradeLabel.textContent = '批改中';
         tagContainer.innerHTML = '';
 
-        // 第一步：讯飞语音评测（有音频 + 已配置 + 有参考文本时执行）
+        // 第一步：讯飞语音评测（有音频 + 已配置时执行，朗读内容作为参照范本）
         let assessSummary = null;
         let assessNote = '';
         try {
@@ -772,10 +779,6 @@
                 assessNote = '本次未提供录音音频';
                 assessPlaceholder.classList.remove('error');
                 assessPlaceholder.textContent = '⏳ 未检测到录音：本次批改不含读音测评数据（讯飞评测已就绪，录音或上传音频后自动评测）';
-            } else if (!info.content) {
-                assessNote = '朗读内容为空（AI 自动匹配），无参考文本可评测';
-                assessPlaceholder.classList.remove('error');
-                assessPlaceholder.textContent = '⏳ 朗读内容为空（AI 将自动匹配），无法进行读音测评';
             } else if (!window.chineseAI.evaluateAudio) {
                 assessNote = '当前应用版本不支持语音评测';
                 assessPlaceholder.classList.remove('error');
@@ -817,9 +820,13 @@
             }
         } finally {
             isGradingRecite = false;
-            gradeBtn.disabled = false;
+            updateGradeBtnState();
         }
     }
 
     gradeBtn.addEventListener('click', gradeRecitation);
+    reciteContentInput.addEventListener('input', updateGradeBtnState);
+
+    // 初始状态：朗读内容空白 → 批改按钮禁用
+    updateGradeBtnState();
 })();
