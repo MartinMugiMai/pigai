@@ -9,10 +9,12 @@ contextBridge.exposeInMainWorld('chineseAI', {
     // messages: [{ role: 'system' | 'user', content: string }]
     // 返回：评语文本（string）；失败时 reject Error
     reviewEssay: (messages) => ipcRenderer.invoke('glm:chat', messages),
-    // 返回：{ hasKey, apiType, customUrl, model, keyMasked, displayName }
+    // 返回：{ hasKey, apiType, customUrl, model, keyMasked, displayName, xfConfigured, xfAppId }
     getConfigStatus: () => ipcRenderer.invoke('config:get'),
-    // cfg: { apiType: 'glm'|'custom', key?, customUrl?, model? }
+    // cfg: { apiType: 'glm'|'custom', key?, customUrl?, model?, xfAppId?, xfApiKey?, xfApiSecret? }
     saveConfig: (cfg) => ipcRenderer.invoke('config:save', cfg),
     // 打开（或聚焦）请求日志窗口
-    openLogWindow: () => ipcRenderer.invoke('log:open-window')
+    openLogWindow: () => ipcRenderer.invoke('log:open-window'),
+    // 讯飞语音评测：{ audioBase64, refText } → 评测结果 JSON
+    evaluateAudio: (payload) => ipcRenderer.invoke('xfyun:evaluate', payload)
 });

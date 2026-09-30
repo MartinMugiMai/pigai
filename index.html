@@ -196,6 +196,19 @@
                 <label>模型名称 <span>可选，留空自动探测</span></label>
                 <input type="text" id="customModelInput" placeholder="留空则自动探测服务端可用模型">
             </div>
+            <div class="modal-divider">讯飞语音评测（可选 · 用于朗读音频的读音测评，需在讯飞开放平台申请）</div>
+            <div class="entry-item">
+                <label>讯飞 APPID <span>Xfyun AppID</span></label>
+                <input type="text" id="xfAppIdInput" placeholder="例如：29a5c4d5" autocomplete="off">
+            </div>
+            <div class="entry-item">
+                <label>讯飞 API Key <span>APIKey</span></label>
+                <input type="password" id="xfApiKeyInput" placeholder="已配置则留空保持不变" autocomplete="off">
+            </div>
+            <div class="entry-item">
+                <label>讯飞 API Secret <span>APISecret</span></label>
+                <input type="password" id="xfApiSecretInput" placeholder="已配置则留空保持不变" autocomplete="off">
+            </div>
         </div>
         <div class="modal-actions">
             <button type="button" class="btn btn-secondary" id="apiCancelBtn">取消</button>
@@ -204,6 +217,7 @@
     </div>
 </div>
 
-<script src="js/main.js"></script>
+  <script src="node_modules/lamejs/lame.min.js"></script>
+  <script src="js/main.js"></script>
 </body>
 </html>

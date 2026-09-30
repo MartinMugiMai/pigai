@@ -9,6 +9,7 @@
 const { app, BrowserWindow, session, ipcMain, net, dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const xfyun = require('./xfyun');
 
 // 开发模式（npm start）与打包发行版使用各自独立的用户数据目录：
 // 调试期的 API 配置不会影响发行版的"首次运行"体验
@@ -23,7 +24,7 @@ const GLM_PRESET = {
 };
 
 // ==================== API 配置（存于用户数据目录，不进项目仓库） ====================
-let apiConfig = { apiType: 'glm', key: '', customUrl: '', model: '' };
+let apiConfig = { apiType: 'glm', key: '', customUrl: '', model: '', xfAppId: '', xfApiKey: '', xfApiSecret: '' };
 
 function configFilePath() {
     return path.join(app.getPath('userData'), 'config.json');
@@ -277,7 +278,9 @@ ipcMain.handle('config:get', () => ({
     customUrl: apiConfig.customUrl || '',
     model: apiConfig.model || '',
     keyMasked: apiConfig.key ? maskKey(apiConfig.key) : '',
-    displayName: apiDisplayName()
+    displayName: apiDisplayName(),
+    xfConfigured: Boolean(apiConfig.xfAppId && apiConfig.xfApiKey && apiConfig.xfApiSecret),
+    xfAppId: apiConfig.xfAppId || ''
 }));
 
 // 配置保存：Key 传入即更新；自定义接口模型名留空时自动探测可用模型
@@ -287,14 +290,42 @@ ipcMain.handle('config:save', async (_event, cfg) => {
     if (typeof cfg.key === 'string' && cfg.key.trim()) next.key = cfg.key.trim();
     if (typeof cfg.customUrl === 'string') next.customUrl = cfg.customUrl.trim();
     if (typeof cfg.model === 'string') next.model = cfg.model.trim();
+    if (typeof cfg.xfAppId === 'string' && cfg.xfAppId.trim()) next.xfAppId = cfg.xfAppId.trim();
+    if (typeof cfg.xfApiKey === 'string' && cfg.xfApiKey.trim()) next.xfApiKey = cfg.xfApiKey.trim();
+    if (typeof cfg.xfApiSecret === 'string' && cfg.xfApiSecret.trim()) next.xfApiSecret = cfg.xfApiSecret.trim();
     if (!next.key) throw new Error('KEY_EMPTY');
     if (next.apiType === 'custom' && next.customUrl && !next.model) {
         try { next.model = await detectCustomModel(next); } catch { /* 探测失败则留空，调用时再试 */ }
     }
     apiConfig = next;
     persistApiConfig();
-    pushLog({ type: '配置', detail: `类型 ${apiConfig.apiType} · 模型 ${apiConfig.model || GLM_PRESET.model}${apiConfig.customUrl ? ' · ' + apiConfig.customUrl : ''} · Key ${maskKey(apiConfig.key)}` });
+    pushLog({ type: '配置', detail: `类型 ${apiConfig.apiType} · 模型 ${apiConfig.model || GLM_PRESET.model}${apiConfig.customUrl ? ' · ' + apiConfig.customUrl : ''} · Key ${maskKey(apiConfig.key)} · 讯飞评测 ${apiConfig.xfAppId ? '已配置(' + apiConfig.xfAppId + ')' : '未配置'}` });
     return { ok: true, keyMasked: maskKey(apiConfig.key), model: apiConfig.model };
+});
+
+// 讯飞语音评测：渲染层把录音转好的 MP3（base64）与朗读内容（refText）送来评测
+ipcMain.handle('xfyun:evaluate', async (_event, payload) => {
+    const { audioBase64, refText } = payload || {};
+    if (!audioBase64) throw new Error('缺少音频数据');
+    if (!apiConfig.xfAppId || !apiConfig.xfApiKey || !apiConfig.xfApiSecret) {
+        pushLog({ type: '错误', model: '讯飞 suntone 语音评测', detail: '未配置 APPID / APIKey / APISecret，跳过读音测评' });
+        throw new Error('XF_NOT_CONFIGURED');
+    }
+    pushLog({ type: '请求', model: '讯飞 suntone 语音评测', detail: `开始读音评测 · 参考文本 ${String(refText || '').length} 字` });
+    try {
+        const result = await xfyun.evaluate(audioBase64, {
+            appId: apiConfig.xfAppId,
+            apiKey: apiConfig.xfApiKey,
+            apiSecret: apiConfig.xfApiSecret,
+            refText
+        });
+        const r = (result && result.result) || {};
+        pushLog({ type: '响应', model: '讯飞 suntone 语音评测', detail: `总分 ${r.overall ?? '—'} · 发音 ${r.pronunciation ?? '—'} · 声调 ${r.tone ?? '—'} · 流利度 ${r.fluency ?? '—'} · 完整度 ${r.integrity ?? '—'} · 韵律 ${r.rhythm ?? '—'} · 语速 ${r.speed ?? '—'}` });
+        return result;
+    } catch (e) {
+        pushLog({ type: '错误', model: '讯飞 suntone 语音评测', detail: e.message });
+        throw e;
+    }
 });
 
 // GLM 调用走主进程 net.fetch：不受 CORS 约束，Key 与配置不出主进程

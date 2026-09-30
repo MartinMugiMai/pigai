@@ -804,3 +804,15 @@ body {
     font-family: 'Segoe UI', 'PingFang SC', sans-serif;
     line-height: 1.6;
 }
+.assess-placeholder.error {
+    background: #fbe9e2;
+    border-color: #c05a5a;
+    color: #8f2f2f;
+}
+.modal-divider {
+    font-size: 12px;
+    color: #7a5f48;
+    border-top: 1px dashed #dacfc1;
+    padding-top: 12px;
+    margin-top: 4px;
+}

@@ -36,6 +36,9 @@
     const customModelInput = document.getElementById('customModelInput');
     const apiCancelBtn = document.getElementById('apiCancelBtn');
     const apiSaveBtn = document.getElementById('apiSaveBtn');
+    const xfAppIdInput = document.getElementById('xfAppIdInput');
+    const xfApiKeyInput = document.getElementById('xfApiKeyInput');
+    const xfApiSecretInput = document.getElementById('xfApiSecretInput');
 
     function toggleCustomFields() {
         const isCustom = apiTypeSelect.value === 'custom';
@@ -82,6 +85,10 @@
                 } else {
                     keyMask.style.display = 'none';
                 }
+                xfAppIdInput.value = s.xfAppId || '';
+                const xfState = s.xfConfigured ? '已配置（留空保持不变）' : '未配置';
+                xfApiKeyInput.placeholder = '讯飞 APIKey ' + xfState;
+                xfApiSecretInput.placeholder = '讯飞 APISecret ' + xfState;
             } catch { /* 读取失败则保持空表单 */ }
         }
         apiKeyInput.value = '';
@@ -138,7 +145,10 @@
                 apiType: apiTypeSelect.value,
                 key,
                 customUrl: customUrlInput.value.trim(),
-                model: customModelInput.value.trim()
+                model: customModelInput.value.trim(),
+                xfAppId: xfAppIdInput.value.trim(),
+                xfApiKey: xfApiKeyInput.value.trim(),
+                xfApiSecret: xfApiSecretInput.value.trim()
             });
             closeApiSetup();
             window.chineseAI.getConfigStatus().then(applyApiStatus).catch(() => {});
@@ -319,6 +329,7 @@
     const gradeLabel = document.getElementById('gradeLabel');
     const commentDisplay = document.getElementById('commentDisplay');
     const tagContainer = document.getElementById('tagContainer');
+    const assessPlaceholder = document.getElementById('assessPlaceholder');
 
     const voiceRecordBtn = document.getElementById('voiceRecordBtn');
     const voiceStopBtn = document.getElementById('voiceStopBtn');
@@ -430,7 +441,7 @@
     });
 
     // 组装朗诵批改提示词（数字评分满分100 + 30字评语 + 特征标签）
-    function buildReciteMessages(info) {
+    function buildReciteMessages(info, assessSummary, assessNote) {
         const system = [
             '你是一位资深的中小学语文朗读指导教师，负责批改学生的朗读。',
             '请依据提供的信息批改学生的朗读，并严格遵守：',
@@ -449,12 +460,98 @@
             `【朗读内容】${info.content || '（未提供，请根据朗诵标题与内容类型给出标准朗读文本，并以此作为批改依据）'}`,
             `【评价要求】${info.req}`,
             info.durationSec > 0 ? `【录音时长】约 ${info.durationSec} 秒` : null,
-            '【语音评测数据】暂缺。讯飞语音评测（suntone）接入后，此处将提供 overall（总分）、pronunciation（发音）、tone（声调）、fluency（流利度）、integrity（完整度）、rhythm（韵律度）、speed（语速）及逐字读音数据，请结合该数据评价读音与节奏。'
+            assessSummary
+                ? `【语音评测数据】（讯飞 suntone 实测）${JSON.stringify(assessSummary)}\n请务必结合以上读音测评数据评价读音准确度、流利度与韵律，并在评语中体现明显问题。`
+                : `【语音评测数据】暂缺（${assessNote || '未提供录音'}）。请基于朗诵标题与朗读内容进行指导性评价。`
         ].filter(Boolean).join('\n');
         return [
             { role: 'system', content: system },
             { role: 'user', content: user }
         ];
+    }
+
+    // 录音 Blob(webm/opus) → 16k 单声道 MP3 base64（讯飞 suntone 要求 lame 编码）
+    async function blobToMp3Base64(blob) {
+        const arrayBuf = await blob.arrayBuffer();
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const decoded = await ctx.decodeAudioData(arrayBuf);
+        await ctx.close();
+
+        const targetRate = 16000;
+        const length = Math.max(1, Math.ceil(decoded.duration * targetRate));
+        const offline = new OfflineAudioContext(1, length, targetRate);
+        const mono = offline.createBuffer(1, decoded.length, decoded.sampleRate);
+        const monoData = mono.getChannelData(0);
+        const ch0 = decoded.getChannelData(0);
+        if (decoded.numberOfChannels > 1) {
+            const ch1 = decoded.getChannelData(1);
+            for (let i = 0; i < decoded.length; i++) monoData[i] = (ch0[i] + ch1[i]) / 2;
+        } else {
+            monoData.set(ch0);
+        }
+        const src = offline.createBufferSource();
+        src.buffer = mono;
+        src.connect(offline.destination);
+        src.start();
+        const rendered = await offline.startRendering();
+
+        const pcm = rendered.getChannelData(0);
+        const pcm16 = new Int16Array(pcm.length);
+        for (let i = 0; i < pcm.length; i++) {
+            const s = Math.max(-1, Math.min(1, pcm[i]));
+            pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+
+        const encoder = new lamejs.Mp3Encoder(1, targetRate, 128);
+        const mp3Chunks = [];
+        const blockSize = 1152 * 10;
+        for (let i = 0; i < pcm16.length; i += blockSize) {
+            const buf = encoder.encodeBuffer(pcm16.subarray(i, i + blockSize));
+            if (buf.length) mp3Chunks.push(new Uint8Array(buf));
+        }
+        const tail = encoder.flush();
+        if (tail.length) mp3Chunks.push(new Uint8Array(tail));
+
+        const mp3Blob = new Blob(mp3Chunks, { type: 'audio/mp3' });
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(',')[1]);
+            reader.onerror = () => reject(new Error('MP3 base64 编码失败'));
+            reader.readAsDataURL(mp3Blob);
+        });
+    }
+
+    // 从讯飞评测结果提取批改提示词所需的关键维度
+    function summarizeAssess(decoded) {
+        const r = (decoded && decoded.result) || {};
+        const summary = {
+            总分: r.overall ?? null,
+            发音得分: r.pronunciation ?? null,
+            声调得分: r.tone ?? null,
+            流利度: r.fluency ?? null,
+            完整度: r.integrity ?? null,
+            韵律度: r.rhythm ?? null,
+            语速: r.speed ?? null,
+            音频时长: r.duration ?? null
+        };
+        const wrong = [];
+        const missed = [];
+        const scan = arr => (arr || []).forEach(w => {
+            if (w.readType === 2) missed.push(w.word);
+            else if (w.readType === 4) wrong.push(w.word);
+        });
+        scan(r.words);
+        scan(r.sentences);
+        if (wrong.length) summary.错读字 = wrong.join('');
+        if (missed.length) summary.漏读字 = missed.join('');
+        return summary;
+    }
+
+    function renderAssess(summary) {
+        assessPlaceholder.classList.remove('error');
+        assessPlaceholder.textContent = '✅ 讯飞语音评测完成：' + Object.entries(summary)
+            .filter(([, v]) => v !== null && v !== undefined && v !== '')
+            .map(([k, v]) => `${k} ${v}`).join(' · ');
     }
 
     // 解析大模型回复中的 评分 / 评语 / 标签
@@ -515,10 +612,50 @@
         gradeBtn.disabled = true;
         scoreDisplay.textContent = '…';
         gradeLabel.textContent = '批改中';
-        commentDisplay.textContent = '⏳ 正在调用大模型批改朗读，请稍候…';
         tagContainer.innerHTML = '';
+
+        // 第一步：讯飞语音评测（已录音 + 已配置 + 有参考文本时执行）
+        let assessSummary = null;
+        let assessNote = '';
         try {
-            const reply = await window.chineseAI.reviewEssay(buildReciteMessages(info));
+            if (!recordedBlob) {
+                assessNote = '本次未提供录音音频';
+                assessPlaceholder.classList.remove('error');
+                assessPlaceholder.textContent = '⏳ 未检测到录音：本次批改不含读音测评数据（讯飞评测已就绪，录音后自动评测）';
+            } else if (!info.content) {
+                assessNote = '朗读内容为空（AI 自动匹配），无参考文本可评测';
+                assessPlaceholder.classList.remove('error');
+                assessPlaceholder.textContent = '⏳ 朗读内容为空（AI 将自动匹配），无法进行读音测评';
+            } else if (!window.chineseAI.evaluateAudio) {
+                assessNote = '当前应用版本不支持语音评测';
+                assessPlaceholder.classList.remove('error');
+                assessPlaceholder.textContent = '⏳ 当前应用版本不支持语音评测，本次批改不含读音测评数据';
+            } else {
+                commentDisplay.textContent = '⏳ 第一步：讯飞语音评测中…';
+                assessPlaceholder.classList.remove('error');
+                assessPlaceholder.textContent = '⏳ 正在进行讯飞语音评测（suntone）…';
+                const audioBase64 = await blobToMp3Base64(recordedBlob);
+                const result = await window.chineseAI.evaluateAudio({ audioBase64, refText: info.content });
+                assessSummary = summarizeAssess(result);
+                renderAssess(assessSummary);
+            }
+        } catch (e) {
+            const msg = String(e.message || e);
+            if (msg.includes('XF_NOT_CONFIGURED')) {
+                assessNote = '讯飞语音评测未配置';
+                assessPlaceholder.classList.add('error');
+                assessPlaceholder.textContent = '❌ 讯飞语音评测未配置（右上角 ⚙️ API 设置中可配置），本次批改不含读音测评数据';
+            } else {
+                assessNote = '讯飞语音评测失败：' + msg;
+                assessPlaceholder.classList.add('error');
+                assessPlaceholder.textContent = '❌ 讯飞语音评测失败：' + msg + '（本次批改不含读音测评数据）';
+            }
+        }
+
+        // 第二步：大模型综合批改
+        commentDisplay.textContent = '⏳ 正在调用大模型批改朗读，请稍候…';
+        try {
+            const reply = await window.chineseAI.reviewEssay(buildReciteMessages(info, assessSummary, assessNote));
             applyReciteResult(parseReciteResult(reply));
         } catch (err) {
             const msg = String(err.message || err);

@@ -30,18 +30,25 @@
       "electron/**/*"
     ],
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.education",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "录制学生的古诗背诵音频，用于背诵批改与流畅度评估。"
       }
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "dependencies": {
+    "lamejs": "^1.2.0"
   }
 }
