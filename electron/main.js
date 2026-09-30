@@ -6,10 +6,15 @@
 //   通过 IPC 与渲染层交互：渲染层只能拿到掩码状态，拿不到完整 Key
 // - GLM 调用走主进程 net.fetch（无 CORS 限制）
 // ============================================================
-const { app, BrowserWindow, session, ipcMain, net, dialog, shell } = require('electron');
+const { app, BrowserWindow, session, ipcMain, net, dialog, shell, systemPreferences } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const xfyun = require('./xfyun');
+
+// macOS 录音静音修复：禁用进程外音频服务。
+// Electron 开启 AudioServiceOutOfProcess 时，macOS（含 Intel 的 macOS 12 与
+// Apple Silicon 新版系统）上 getUserMedia 常采集到全零静音流，必须回退进程内采集。
+app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess');
 
 // 开发模式（npm start）与打包发行版使用各自独立的用户数据目录：
 // 调试期的 API 配置不会影响发行版的"首次运行"体验
@@ -272,13 +277,35 @@ function createWindow() {
                     report.recordingsDirCreated = fs.existsSync(path.join(app.getPath('userData'), 'recordings'));
                     console.log('SELFTEST RECORDINGS-DIR:', report.recordingsDirCreated);
                     flush();
-                    // 麦克风探测：拿到确切错误名（NotAllowed/NotFound/NotReadable 等）
+                    // 麦克风探测：拿到确切错误名 + 实测 RMS 电平
+                    // （静音流 RMS 恒为 0，正常采集即使安静环境也有底噪）
                     const micResult = await win.webContents.executeJavaScript(`
-                        (navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
-                            ? navigator.mediaDevices.getUserMedia({ audio: true })
-                                .then(stream => { stream.getTracks().forEach(t => t.stop()); return 'MIC OK'; })
-                                .catch(e => 'MIC FAIL: ' + e.name + ': ' + e.message)
-                            : Promise.resolve('MIC API MISSING')
+                        (async () => {
+                            if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return 'MIC API MISSING';
+                            try {
+                                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                                const src = ctx.createMediaStreamSource(stream);
+                                const proc = ctx.createScriptProcessor(4096, 1, 1);
+                                let sum = 0, n = 0;
+                                proc.onaudioprocess = e => {
+                                    const d = e.inputBuffer.getChannelData(0);
+                                    for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+                                    n += d.length;
+                                };
+                                const mute = ctx.createGain();
+                                mute.gain.value = 0; // 采样但不出声，避免回声
+                                src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+                                await new Promise(r => setTimeout(r, 1500));
+                                const rms = Math.sqrt(sum / Math.max(1, n));
+                                src.disconnect(); proc.disconnect(); mute.disconnect();
+                                stream.getTracks().forEach(t => t.stop());
+                                ctx.close();
+                                return 'MIC OK rms=' + rms.toFixed(7) + (rms > 0.000001 ? ' 有声' : ' 静音!');
+                            } catch (e) {
+                                return 'MIC FAIL: ' + e.name + ': ' + e.message;
+                            }
+                        })()
                     `);
                     report.mic = micResult;
                     console.log('SELFTEST MIC:', micResult);
@@ -313,6 +340,24 @@ function setupPermissions() {
         callback(permission === 'media');
     });
     sess.setPermissionCheckHandler((_webContents, permission) => permission === 'media');
+}
+
+// macOS 隐私授权（TCC）：启动即确认麦克风权限，未授权时触发系统弹窗。
+// 打包应用使用 ad-hoc 签名时，若从不主动请求，系统授权弹窗可能一直不出现，
+// 表现为"能录音但文件全是静音"。状态写入请求日志便于远程排查。
+async function ensureMacMicrophoneAccess() {
+    if (process.platform !== 'darwin' || typeof systemPreferences.getMediaAccessStatus !== 'function') return;
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    pushLog({ type: '麦克风', detail: `macOS 麦克风授权状态：${status}` });
+    if (status === 'granted') return;
+    try {
+        const granted = await systemPreferences.askForMediaAccess('microphone');
+        pushLog({ type: '麦克风', detail: granted
+            ? '用户已允许麦克风访问'
+            : '麦克风访问被拒绝：请在 系统设置 → 隐私与安全性 → 麦克风 中允许本应用' });
+    } catch (e) {
+        pushLog({ type: '麦克风', detail: '麦克风授权请求失败：' + e.message });
+    }
 }
 
 // 配置查询：渲染层只能拿到掩码 Key 与非敏感字段
@@ -450,6 +495,7 @@ if (!app.requestSingleInstanceLock()) {
         loadApiConfig();
         setupPermissions();
         createWindow();
+        ensureMacMicrophoneAccess();
         app.on('activate', () => {
             if (BrowserWindow.getAllWindows().length === 0) createWindow();
         });

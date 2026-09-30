@@ -348,42 +348,99 @@
 
     const DEFAULT_REVIEW_DIMENSIONS = '感情、读音准确、停顿节奏、语气';
 
-    let mediaRecorder = null;
-    let audioChunks = [];
+    let micRecorder = null;       // 当前录音会话（MicRecorder.start() 的返回值）
     let isRecording = false;
-    let recordedBlob = null;      // 录制的朗读音频（后续送讯飞 suntone 评测）
+    let recordedBlob = null;      // 录制的朗读音频（WAV，后续送讯飞 suntone 评测）
     let recordingStartTime = null;
     let lastRecordingSeconds = 0; // 最近一次录音时长（秒）
     let isGradingRecite = false;
 
+    // ==================== 麦克风原始 PCM 采集（Web Audio → WAV） ====================
+    // 不使用 MediaRecorder(webm/opus)：Electron 在 macOS 上常产出"文件正常但内容
+    // 全零"的静音录音（Intel macOS 12 与 Apple Silicon 新版系统均受影响），且 webm
+    // 还需二次解码。这里用 AudioWorklet 采集 Float32 PCM，停止时合成 16bit 单声道
+    // WAV——保存即可直接播放，转 16k MP3 送讯飞也只需一次重采样。
+    // AudioWorklet 不可用时回退 ScriptProcessorNode（老系统兼容）。
+    const MicRecorder = (() => {
+        const WORKLET_SRC = [
+            'class PigaiCapture extends AudioWorkletProcessor {',
+            '  process(inputs) {',
+            '    const ch = inputs[0] && inputs[0][0];',
+            '    if (ch && ch.length) this.port.postMessage(ch.slice(0));',
+            '    return true;',
+            '  }',
+            '}',
+            "registerProcessor('pigai-capture', PigaiCapture);"
+        ].join('\n');
+
+        // Float32 分片 → 16bit 单声道 WAV Blob（44 字节标准头）
+        function encodeWav(chunks, sampleRate) {
+            const total = chunks.reduce((s, c) => s + c.length, 0);
+            const pcm = new Int16Array(total);
+            let idx = 0;
+            for (const c of chunks) {
+                for (let i = 0; i < c.length; i++) {
+                    const s = Math.max(-1, Math.min(1, c[i]));
+                    pcm[idx++] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+            }
+            const buf = new ArrayBuffer(44 + pcm.length * 2);
+            const view = new DataView(buf);
+            const wstr = (off, str) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)); };
+            wstr(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true); wstr(8, 'WAVE');
+            wstr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true); wstr(36, 'data'); view.setUint32(40, pcm.length * 2, true);
+            new Int16Array(buf, 44).set(pcm);
+            return new Blob([buf], { type: 'audio/wav' });
+        }
+
+        return {
+            // 打开麦克风并开始采集；返回 { sampleRate, stop(): Promise<Blob> }
+            async start() {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const sampleRate = ctx.sampleRate;
+                const source = ctx.createMediaStreamSource(stream);
+                const chunks = [];
+                const onChunk = data => chunks.push(new Float32Array(data));
+                let worklet = null, processor = null, sink = null;
+                try {
+                    const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
+                    await ctx.audioWorklet.addModule(url);
+                    URL.revokeObjectURL(url);
+                    worklet = new AudioWorkletNode(ctx, 'pigai-capture');
+                    worklet.port.onmessage = e => onChunk(e.data);
+                    source.connect(worklet);
+                    worklet.connect(ctx.destination); // 不落图不处理；worklet 输出未写入即静音，无回声
+                } catch (e) {
+                    processor = ctx.createScriptProcessor(4096, 1, 1);
+                    processor.onaudioprocess = e => onChunk(new Float32Array(e.inputBuffer.getChannelData(0)));
+                    sink = ctx.createGain();
+                    sink.gain.value = 0; // 零增益防回声
+                    source.connect(processor);
+                    processor.connect(sink);
+                    sink.connect(ctx.destination);
+                }
+                return {
+                    async stop() {
+                        try { source.disconnect(); } catch (e) {}
+                        try { worklet && worklet.disconnect(); } catch (e) {}
+                        try { processor && processor.disconnect(); } catch (e) {}
+                        try { sink && sink.disconnect(); } catch (e) {}
+                        stream.getTracks().forEach(t => t.stop());
+                        try { await ctx.close(); } catch (e) {}
+                        return encodeWav(chunks, sampleRate);
+                    }
+                };
+            }
+        };
+    })();
+
     async function startRecording() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            audioChunks = [];
-
-            mediaRecorder.ondataavailable = event => {
-                audioChunks.push(event.data);
-            };
-
-            mediaRecorder.onstop = () => {
-                recordedBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                lastRecordingSeconds = recordingStartTime ? Math.round((Date.now() - recordingStartTime) / 1000) : 0;
-                voiceDetail.textContent = `✅ 已录音（${lastRecordingSeconds}s）`;
-                voiceStatus.textContent = '🎤 录音完成，可开始批改';
-                pulseDot.classList.remove('active');
-                voiceRecordBtn.textContent = '🎤 重新录音';
-                voiceRecordBtn.classList.remove('recording');
-                voiceStopBtn.disabled = true;
-                stream.getTracks().forEach(track => track.stop());
-                mediaRecorder = null;
-                saveRecordingToDisk(recordedBlob);
-                // TODO(讯飞 suntone)：recordedBlob 需转为 16k 单声道 mp3 后分段送评测，
-                // 评测结果（overall/pronunciation/tone/fluency/integrity/rhythm/speed）
-                // 将并入 buildReciteMessages 的提示词
-            };
-
-            mediaRecorder.start();
+            micRecorder = await MicRecorder.start();
             isRecording = true;
             recordingStartTime = Date.now();
             pulseDot.classList.add('active');
@@ -407,14 +464,36 @@
         }
     }
 
-    function stopRecording() {
-        if (mediaRecorder && isRecording) {
-            mediaRecorder.stop();
+    async function stopRecording() {
+        const recorder = micRecorder;
+        if (recorder && isRecording) {
+            micRecorder = null;
             isRecording = false;
-            voiceRecordBtn.disabled = false;
             voiceStopBtn.disabled = true;
+            voiceRecordBtn.disabled = true;
+            try {
+                recordedBlob = await recorder.stop();
+            } catch (e) {
+                console.error('录音收尾失败:', e);
+                recordedBlob = null;
+            }
+            pulseDot.classList.remove('active');
             voiceRecordBtn.classList.remove('recording');
-            voiceStatus.textContent = '⏹ 录音已停止';
+            voiceRecordBtn.disabled = false;
+            if (recordedBlob) {
+                lastRecordingSeconds = recordingStartTime ? Math.round((Date.now() - recordingStartTime) / 1000) : 0;
+                voiceDetail.textContent = `✅ 已录音（${lastRecordingSeconds}s）`;
+                voiceStatus.textContent = '🎤 录音完成，可开始批改';
+                voiceRecordBtn.textContent = '🎤 重新录音';
+                saveRecordingToDisk(recordedBlob);
+                // TODO(讯飞 suntone)：recordedBlob（WAV）转 16k 单声道 mp3 后送评测，
+                // 评测结果（overall/pronunciation/tone/fluency/integrity/rhythm/speed）
+                // 将并入 buildReciteMessages 的提示词
+            } else {
+                voiceStatus.textContent = '❌ 录音失败，请重试';
+                voiceDetail.textContent = '⏳ 未录音';
+                voiceRecordBtn.textContent = '🎤 开始录音';
+            }
         } else {
             resetVoiceUI();
         }
@@ -427,9 +506,10 @@
         voiceStopBtn.disabled = true;
         voiceRecordBtn.disabled = false;
         isRecording = false;
-        if (mediaRecorder) {
-            try { mediaRecorder.stop(); } catch(e) {}
-            mediaRecorder = null;
+        if (micRecorder) {
+            const recorder = micRecorder;
+            micRecorder = null;
+            recorder.stop().catch(() => {});
         }
         if (!recordedBlob) {
             voiceStatus.textContent = '点击 🎤 开始录音';
@@ -499,7 +579,8 @@
             const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
             const title = namePart || reciteTitleInput.value.trim();
             const cleanTitle = title.replace(/[\\/:*?"<>|]/g, '').slice(0, 20);
-            const ext = (blob.type || '').includes('mpeg') ? 'mp3' : 'webm';
+            const type = blob.type || '';
+            const ext = type.includes('mpeg') || type.includes('mp3') ? 'mp3' : type.includes('wav') ? 'wav' : 'webm';
             const filename = (cleanTitle ? `录音-${cleanTitle}-` : '录音-') + stamp + '.' + ext;
             const base64 = await blobToBase64(blob);
             const r = await window.chineseAI.saveRecording({ base64, filename });
@@ -539,7 +620,7 @@
         ];
     }
 
-    // 录音 Blob(webm/opus) → 16k 单声道 MP3 base64（讯飞 suntone 要求 lame 编码）
+    // 录音 Blob(WAV/webm/mp3) → 16k 单声道 MP3 base64（讯飞 suntone 要求 lame 编码）
     async function blobToMp3Base64(blob) {
         const arrayBuf = await blob.arrayBuffer();
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
