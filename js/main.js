@@ -22,6 +22,7 @@
     // ==================== API 设置弹窗（首次配置 / 随时修改） ====================
     const apiSettingsBtn = document.getElementById('apiSettingsBtn');
     const apiStatusBadge = document.getElementById('apiStatusBadge');
+    const logWindowBtn = document.getElementById('logWindowBtn');
     const apiSetupOverlay = document.getElementById('apiSetupOverlay');
     const apiTypeSelect = document.getElementById('apiTypeSelect');
     const apiKeyInput = document.getElementById('apiKeyInput');
@@ -92,6 +93,11 @@
     function closeApiSetup() {
         apiSetupOverlay.classList.remove('visible');
     }
+
+    // 请求日志窗口（Electron 子窗口）；浏览器模式下无日志可看
+    logWindowBtn.addEventListener('click', function() {
+        if (window.chineseAI) window.chineseAI.openLogWindow();
+    });
 
     apiSettingsBtn.addEventListener('click', openApiSetup);
     apiCancelBtn.addEventListener('click', closeApiSetup);
@@ -295,6 +301,7 @@
         }).catch(() => {});
     } else {
         apiSettingsBtn.style.display = 'none';
+        logWindowBtn.style.display = 'none';
     }
 
     // ==================== 古诗默写批改逻辑 ====================

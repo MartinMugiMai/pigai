@@ -6,7 +6,7 @@
 //   通过 IPC 与渲染层交互：渲染层只能拿到掩码状态，拿不到完整 Key
 // - GLM 调用走主进程 net.fetch（无 CORS 限制）
 // ============================================================
-const { app, BrowserWindow, session, ipcMain, net } = require('electron');
+const { app, BrowserWindow, session, ipcMain, net, dialog } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -80,6 +80,57 @@ async function detectCustomModel(cfg) {
     return chatModel || ids[0] || '';
 }
 
+// ==================== 请求日志（主进程记录，独立日志窗口展示/保存） ====================
+const glmLog = [];
+let logWin = null;
+
+function pushLog(entry) {
+    const item = { time: new Date().toLocaleString('zh-CN', { hour12: false }), ...entry };
+    glmLog.push(item);
+    if (glmLog.length > 500) glmLog.shift();
+    if (logWin && !logWin.isDestroyed()) logWin.webContents.send('glm:log-append', item);
+    console.log('[Pigai日志]', item.type, item.model || '', String(item.detail || '').slice(0, 80).replace(/\n/g, ' '));
+    return item;
+}
+
+function openLogWindow() {
+    if (logWin && !logWin.isDestroyed()) { logWin.focus(); return logWin; }
+    logWin = new BrowserWindow({
+        width: 760,
+        height: 560,
+        title: '请求日志 · Pigai',
+        autoHideMenuBar: true,
+        webPreferences: {
+            preload: path.join(__dirname, 'log-preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false
+        }
+    });
+    logWin.loadFile(path.join(__dirname, '..', 'log.html'));
+    logWin.on('closed', () => { logWin = null; });
+    return logWin;
+}
+
+ipcMain.handle('log:open-window', () => { openLogWindow(); return { ok: true }; });
+ipcMain.handle('log:get-all', () => glmLog);
+ipcMain.handle('log:save', async () => {
+    const opts = {
+        title: '保存请求日志',
+        defaultPath: 'pigai-log-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.txt',
+        filters: [{ name: '文本文件', extensions: ['txt'] }]
+    };
+    const result = (logWin && !logWin.isDestroyed())
+        ? await dialog.showSaveDialog(logWin, opts)
+        : await dialog.showSaveDialog(opts);
+    const { canceled, filePath } = result;
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    const text = glmLog.map(e =>
+        `[${e.time}] ${e.type}${e.model ? ' · ' + e.model : ''}${e.status ? ' · HTTP ' + e.status : ''}\n${e.detail || ''}\n${'-'.repeat(64)}`
+    ).join('\n') + '\n';
+    fs.writeFileSync(filePath, text, 'utf8');
+    return { ok: true, path: filePath };
+});
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
@@ -149,6 +200,16 @@ function createWindow() {
                         }
                     }
                     flush();
+                    // 请求日志窗口：点击主页面按钮后应弹出独立日志窗口
+                    await win.webContents.executeJavaScript("document.getElementById('logWindowBtn').click()");
+                    await new Promise(r => setTimeout(r, 2500));
+                    const logW = BrowserWindow.getAllWindows().find(w => w !== win);
+                    report.logWindowCount = BrowserWindow.getAllWindows().length;
+                    if (logW && !logW.isDestroyed()) {
+                        report.logWindowText = (await logW.webContents.executeJavaScript("document.body.innerText")).slice(0, 150);
+                    }
+                    console.log('SELFTEST LOGWIN:', JSON.stringify({ count: report.logWindowCount, text: (report.logWindowText || '').slice(0, 60) }));
+                    flush();
                     // 麦克风探测：拿到确切错误名（NotAllowed/NotFound/NotReadable 等）
                     const micResult = await win.webContents.executeJavaScript(`
                         (navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
@@ -203,6 +264,7 @@ ipcMain.handle('config:save', async (_event, cfg) => {
     }
     apiConfig = next;
     persistApiConfig();
+    pushLog({ type: '配置', detail: `类型 ${apiConfig.apiType} · 模型 ${apiConfig.model || GLM_PRESET.model}${apiConfig.customUrl ? ' · ' + apiConfig.customUrl : ''} · Key ${maskKey(apiConfig.key)}` });
     return { ok: true, keyMasked: maskKey(apiConfig.key), model: apiConfig.model };
 });
 
@@ -228,26 +290,44 @@ ipcMain.handle('glm:chat', async (_event, messages) => {
         url = GLM_PRESET.url;
         model = GLM_PRESET.model;
     }
-    const resp = await net.fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + apiConfig.key
-        },
-        body: JSON.stringify({
-            model,
-            messages,
-            temperature: 0.6
-        })
-    });
-    const data = await resp.json().catch(() => null);
-    if (!resp.ok) {
-        const msg = data && data.error ? (data.error.message || JSON.stringify(data.error)) : 'HTTP ' + resp.status;
-        throw new Error(msg);
+    const startedAt = Date.now();
+    let logged = false;
+    let data = null;
+    pushLog({ type: '请求', url, model, detail: JSON.stringify(messages, null, 2) });
+    try {
+        const resp = await net.fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + apiConfig.key
+            },
+            body: JSON.stringify({
+                model,
+                messages,
+                temperature: 0.6
+            })
+        });
+        data = await resp.json().catch(() => null);
+        if (!resp.ok) {
+            const msg = data && data.error ? (data.error.message || JSON.stringify(data.error)) : 'HTTP ' + resp.status;
+            pushLog({ type: '错误', url, model, status: resp.status, detail: `耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s\n${msg}` });
+            logged = true;
+            throw new Error(msg);
+        }
+        const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (!content) {
+            pushLog({ type: '错误', url, model, status: resp.status, detail: `耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s\n接口返回内容为空：${JSON.stringify(data).slice(0, 400)}` });
+            logged = true;
+            throw new Error('接口返回内容为空，请重试');
+        }
+        const usage = data.usage ? ` · tokens ${data.usage.prompt_tokens ?? '?'}→${data.usage.completion_tokens ?? '?'}` : '';
+        pushLog({ type: '响应', url, model, status: resp.status, detail: `耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s${usage}\n${content}` });
+        logged = true;
+        return content.trim();
+    } catch (e) {
+        if (!logged) pushLog({ type: '错误', url, model, detail: `耗时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s\n${e.message}` });
+        throw e;
     }
-    const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-    if (!content) throw new Error('接口返回内容为空，请重试');
-    return content.trim();
 });
 
 // 单实例锁：二次启动时聚焦已有窗口，避免多实例争抢用户数据缓存

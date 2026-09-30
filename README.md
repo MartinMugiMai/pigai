@@ -7,10 +7,13 @@
 ```
 pigai/
 ├── index.html            页面入口（选项卡切换：作文批改 / 朗诵默写）
+├── log.html              请求日志窗口页面
 ├── css/style.css         样式（卷轴主题 + 选项卡）
 ├── js/main.js            渲染层脚本（表单、选项卡、默写逻辑、IPC 调用）
-├── electron/main.js      Electron 主进程（窗口、麦克风权限、GLM IPC 代理）
+├── js/log.js             日志窗口脚本（渲染日志、保存 TXT）
+├── electron/main.js      Electron 主进程（窗口、麦克风权限、GLM IPC 代理、日志）
 ├── electron/preload.js   预加载脚本（contextBridge 暴露受控调用入口）
+├── electron/log-preload.js 日志窗口预加载脚本
 ├── package.json          Electron 43（钉死主版本，保 macOS 12 兼容）+ 打包配置
 ├── key.txt.example       Key 文件模板（复制为 key.txt 并填入自己的 Key，key.txt 已 gitignore）
 ├── 作文范例1/2.txt        测试数据（配合上传按钮使用）
@@ -50,6 +53,7 @@ npm run dist:mac    # 仅 macOS（dmg）
 
 - **GLM 接口在主进程**：API Key 与网络请求全部位于 `electron/main.js`（`net.fetch`，无 CORS 限制），渲染层通过 preload 暴露的 `window.chineseAI.reviewEssay()` 走 IPC 调用，`js/main.js` 中不含任何密钥。当前模型为免费档 `glm-5.3-flash`（推理模型，生成需数秒到数十秒）。
 - **Electron 版本钉死在 43**：Electron 44 起要求 macOS 13+，钉在 43 主线（`^43.0.0`）以兼容最低 macOS 12 Monterey。将来放弃 macOS 12 时，升级 `package.json` 中版本号即可，页面代码无需改动。
+- **请求日志**：点右上角 **📜 请求日志** 弹出独立日志窗口，实时显示每次大模型调用的请求参数、响应内容、耗时与错误，支持 **💾 一键保存 TXT**（系统保存对话框）。
 - **麦克风**：主进程通过 `setPermissionRequestHandler` 放行 `media` 权限；macOS 打包已在 Info.plist 声明 `NSMicrophoneUsageDescription`（见 `package.json` 的 `build.mac.extendInfo`）。Windows 开箱即用。
 
 ## 浏览器预览模式

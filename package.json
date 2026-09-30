@@ -24,6 +24,7 @@
     },
     "files": [
       "index.html",
+      "log.html",
       "css/**/*",
       "js/**/*",
       "electron/**/*"

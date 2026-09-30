@@ -9,8 +9,10 @@ contextBridge.exposeInMainWorld('chineseAI', {
     // messages: [{ role: 'system' | 'user', content: string }]
     // 返回：评语文本（string）；失败时 reject Error
     reviewEssay: (messages) => ipcRenderer.invoke('glm:chat', messages),
-    // 返回：{ hasKey, apiType, customUrl, model, keyMasked }
+    // 返回：{ hasKey, apiType, customUrl, model, keyMasked, displayName }
     getConfigStatus: () => ipcRenderer.invoke('config:get'),
     // cfg: { apiType: 'glm'|'custom', key?, customUrl?, model? }
-    saveConfig: (cfg) => ipcRenderer.invoke('config:save', cfg)
+    saveConfig: (cfg) => ipcRenderer.invoke('config:save', cfg),
+    // 打开（或聚焦）请求日志窗口
+    openLogWindow: () => ipcRenderer.invoke('log:open-window')
 });
