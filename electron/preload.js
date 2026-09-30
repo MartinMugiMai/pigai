@@ -16,5 +16,9 @@ contextBridge.exposeInMainWorld('chineseAI', {
     // 打开（或聚焦）请求日志窗口
     openLogWindow: () => ipcRenderer.invoke('log:open-window'),
     // 讯飞语音评测：{ audioBase64, refText } → 评测结果 JSON
-    evaluateAudio: (payload) => ipcRenderer.invoke('xfyun:evaluate', payload)
+    evaluateAudio: (payload) => ipcRenderer.invoke('xfyun:evaluate', payload),
+    // 保存录音文件到用户数据目录：{ base64, filename } → { ok, path }
+    saveRecording: (payload) => ipcRenderer.invoke('recordings:save', payload),
+    // 用资源管理器 / Finder 打开录音目录
+    openRecordingsFolder: () => ipcRenderer.invoke('recordings:open-folder')
 });

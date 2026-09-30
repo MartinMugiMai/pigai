@@ -23,6 +23,7 @@
     const apiSettingsBtn = document.getElementById('apiSettingsBtn');
     const apiStatusBadge = document.getElementById('apiStatusBadge');
     const logWindowBtn = document.getElementById('logWindowBtn');
+    const recordingsFolderBtn = document.getElementById('recordingsFolderBtn');
     const apiSetupOverlay = document.getElementById('apiSetupOverlay');
     const apiTypeSelect = document.getElementById('apiTypeSelect');
     const apiKeyInput = document.getElementById('apiKeyInput');
@@ -104,6 +105,11 @@
     // 请求日志窗口（Electron 子窗口）；浏览器模式下无日志可看
     logWindowBtn.addEventListener('click', function() {
         if (window.chineseAI) window.chineseAI.openLogWindow();
+    });
+
+    // 用资源管理器 / Finder 打开录音目录
+    recordingsFolderBtn.addEventListener('click', function() {
+        if (window.chineseAI) window.chineseAI.openRecordingsFolder();
     });
 
     apiSettingsBtn.addEventListener('click', openApiSetup);
@@ -312,6 +318,7 @@
     } else {
         apiSettingsBtn.style.display = 'none';
         logWindowBtn.style.display = 'none';
+        recordingsFolderBtn.style.display = 'none';
     }
 
     // ==================== 朗诵批改逻辑（录音 → 大模型批改） ====================
@@ -368,6 +375,7 @@
                 voiceStopBtn.disabled = true;
                 stream.getTracks().forEach(track => track.stop());
                 mediaRecorder = null;
+                saveRecordingToDisk(recordedBlob);
                 // TODO(讯飞 suntone)：recordedBlob 需转为 16k 单声道 mp3 后分段送评测，
                 // 评测结果（overall/pronunciation/tone/fluency/integrity/rhythm/speed）
                 // 将并入 buildReciteMessages 的提示词
@@ -439,6 +447,32 @@
         e.preventDefault();
         stopRecording();
     });
+
+    function blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(',')[1]);
+            reader.onerror = () => reject(new Error('base64 编码失败'));
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    // 录音停止后自动保存到用户数据目录的 recordings 文件夹
+    async function saveRecordingToDisk(blob) {
+        try {
+            if (!window.chineseAI || !window.chineseAI.saveRecording) return;
+            const now = new Date();
+            const p2 = n => String(n).padStart(2, '0');
+            const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
+            const titlePart = reciteTitleInput.value.trim().replace(/[\\/:*?"<>|]/g, '').slice(0, 20);
+            const filename = (titlePart ? `录音-${titlePart}-` : '录音-') + stamp + '.webm';
+            const base64 = await blobToBase64(blob);
+            const r = await window.chineseAI.saveRecording({ base64, filename });
+            if (!r.ok) console.error('录音保存失败');
+        } catch (e) {
+            console.error('录音保存失败:', e);
+        }
+    }
 
     // 组装朗诵批改提示词（数字评分满分100 + 30字评语 + 特征标签）
     function buildReciteMessages(info, assessSummary, assessNote) {

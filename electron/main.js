@@ -6,7 +6,7 @@
 //   通过 IPC 与渲染层交互：渲染层只能拿到掩码状态，拿不到完整 Key
 // - GLM 调用走主进程 net.fetch（无 CORS 限制）
 // ============================================================
-const { app, BrowserWindow, session, ipcMain, net, dialog } = require('electron');
+const { app, BrowserWindow, session, ipcMain, net, dialog, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const xfyun = require('./xfyun');
@@ -132,6 +132,32 @@ ipcMain.handle('log:save', async () => {
     return { ok: true, path: filePath };
 });
 
+// ==================== 录音文件（存于用户数据目录，可用资源管理器/Finder 打开） ====================
+function recordingsDir() {
+    return path.join(app.getPath('userData'), 'recordings');
+}
+
+// 保存渲染层传来的录音（base64）；文件名在渲染层已做非法字符清理
+ipcMain.handle('recordings:save', (_event, payload) => {
+    const { base64, filename } = payload || {};
+    if (!base64 || !filename) throw new Error('缺少录音数据');
+    const dir = recordingsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const safeName = String(filename).replace(/[\\/:*?"<>|]/g, '');
+    const filePath = path.join(dir, safeName);
+    fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+    pushLog({ type: '录音', detail: `录音已保存：${filePath}` });
+    return { ok: true, path: filePath };
+});
+
+// 用 Windows 资源管理器 / macOS Finder 打开录音目录（不存在则先创建）
+ipcMain.handle('recordings:open-folder', async () => {
+    const dir = recordingsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const err = await shell.openPath(dir); // 成功返回 ''，失败返回错误信息
+    return { ok: !err, path: dir, error: err || '' };
+});
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
@@ -239,6 +265,12 @@ function createWindow() {
                         report.logWindowText = (await logW.webContents.executeJavaScript("document.body.innerText")).slice(0, 150);
                     }
                     console.log('SELFTEST LOGWIN:', JSON.stringify({ count: report.logWindowCount, text: (report.logWindowText || '').slice(0, 60) }));
+                    flush();
+                    // 录音目录按钮：点击后应创建 recordings 目录并打开资源管理器/Finder
+                    await win.webContents.executeJavaScript("document.getElementById('recordingsFolderBtn').click()");
+                    await new Promise(r => setTimeout(r, 1500));
+                    report.recordingsDirCreated = fs.existsSync(path.join(app.getPath('userData'), 'recordings'));
+                    console.log('SELFTEST RECORDINGS-DIR:', report.recordingsDirCreated);
                     flush();
                     // 麦克风探测：拿到确切错误名（NotAllowed/NotFound/NotReadable 等）
                     const micResult = await win.webContents.executeJavaScript(`
