@@ -219,30 +219,25 @@ function createWindow() {
                     }
                     const scope = process.env.APP_SELFTEST_SCOPE || 'essay';
                     if (scope === 'recite') {
-                        // 朗诵批改链路：填标题/类型/内容 → 开始批改 → 轮询数字评分
+                        // 朗诵批改严格流程（无音频）：必须中止且不得调用大模型
                         await win.webContents.executeJavaScript(`
                             document.getElementById('reciteTitle').value = '九月九日忆山东兄弟 · 王维';
                             document.getElementById('contentType').value = '古诗';
-                            document.getElementById('reciteContent').value = '独在异乡为异客，每逢佳节倍思亲。遥知兄弟登高处，遍插茱萸少一人。';
+                            const rc = document.getElementById('reciteContent');
+                            rc.value = '独在异乡为异客，每逢佳节倍思亲。遥知兄弟登高处，遍插茱萸少一人。';
+                            rc.dispatchEvent(new Event('input', { bubbles: true })); // 触发按钮启用
                             document.getElementById('gradeBtn').click();
                         `);
-                        for (let i = 0; i < 40; i++) {
-                            await new Promise(r => setTimeout(r, 3000));
-                            const score = await win.webContents.executeJavaScript("document.getElementById('scoreDisplay').textContent");
-                            if (/^\d{1,3}$/.test(score)) {
-                                report.reciteScore = score;
-                                report.reciteComment = await win.webContents.executeJavaScript("document.getElementById('commentDisplay').textContent");
-                                report.reciteTags = await win.webContents.executeJavaScript("document.getElementById('tagContainer').children.length");
-                                console.log('SELFTEST RECITE:', JSON.stringify({ score, comment: report.reciteComment, tags: report.reciteTags }));
-                                break;
-                            }
-                            const c = await win.webContents.executeJavaScript("document.getElementById('commentDisplay').textContent");
-                            if (c.includes('调用失败')) {
-                                report.reciteError = c;
-                                console.log('SELFTEST RECITE ERROR:', c.slice(0, 120));
-                                break;
-                            }
-                        }
+                        await new Promise(r => setTimeout(r, 1200));
+                        const stopped = await win.webContents.executeJavaScript(`
+                            ({
+                                score: document.getElementById('scoreDisplay').textContent,
+                                comment: document.getElementById('commentDisplay').textContent,
+                                placeholder: document.getElementById('assessPlaceholder').textContent
+                            })
+                        `);
+                        report.reciteNoAudioStop = stopped.comment.includes('未检测到录音') && !/^\d+$/.test(stopped.score);
+                        console.log('SELFTEST RECITE-NO-AUDIO:', JSON.stringify(stopped));
                         flush();
                     } else {
                         await win.webContents.executeJavaScript(`
