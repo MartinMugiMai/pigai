@@ -10,6 +10,12 @@ const { app, BrowserWindow, session, ipcMain, net } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
+// 开发模式（npm start）与打包发行版使用各自独立的用户数据目录：
+// 调试期的 API 配置不会影响发行版的"首次运行"体验
+if (!app.isPackaged) {
+    app.setPath('userData', path.join(app.getPath('appData'), 'Pigai-Dev'));
+}
+
 // GLM 官方预设（公开信息，非机密）：用户选择"默认接口"时使用
 const GLM_PRESET = {
     url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
@@ -41,14 +47,37 @@ function maskKey(key) {
     return key.length > 10 ? key.slice(0, 4) + '****' + key.slice(-4) : '****';
 }
 
-// 由配置解析实际请求参数；Key 未配置 / 自定义链接缺失时抛出约定错误码
-function resolveApi() {
-    if (!apiConfig.key) throw new Error('API_KEY_NOT_SET');
+// 当前所选 API 的识别名称（供界面徽章显示）；未配置 Key 时返回空
+function apiDisplayName() {
+    if (!apiConfig.key) return '';
     if (apiConfig.apiType === 'custom') {
-        if (!apiConfig.customUrl) throw new Error('CUSTOM_URL_NOT_SET');
-        return { url: apiConfig.customUrl, model: apiConfig.model || GLM_PRESET.model };
+        let host = apiConfig.customUrl;
+        try { host = new URL(apiConfig.customUrl).host; } catch { /* 保留原值 */ }
+        return `自定义 · ${host} · ${apiConfig.model || GLM_PRESET.model}`;
     }
-    return { url: GLM_PRESET.url, model: GLM_PRESET.model };
+    return `GLM 官方 · ${GLM_PRESET.model}`;
+}
+
+// ==================== 自定义接口（OpenAI 兼容）辅助 ====================
+// 用户填基础地址（如 http://127.0.0.1:1234）即可：自动补全标准路径
+function normalizeCustomUrl(raw) {
+    let u = String(raw).trim().replace(/\/+$/, '');
+    if (/\/chat\/completions$/i.test(u)) return u;
+    if (/\/v1$/i.test(u)) return u + '/chat/completions';
+    return u + '/v1/chat/completions';
+}
+
+// 模型名留空时自动探测：调 /v1/models 取第一个非 embedding 类模型
+async function detectCustomModel(cfg) {
+    const base = String(cfg.customUrl).trim().replace(/\/+$/, '')
+        .replace(/\/chat\/completions$/i, '').replace(/\/v1$/i, '');
+    const resp = await net.fetch(base + '/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + cfg.key }
+    });
+    const data = await resp.json().catch(() => null);
+    const ids = data && Array.isArray(data.data) ? data.data.map(m => m.id).filter(Boolean) : [];
+    const chatModel = ids.find(id => !/embed|rerank|whisper|tts|guard/i.test(id));
+    return chatModel || ids[0] || '';
 }
 
 function createWindow() {
@@ -67,15 +96,30 @@ function createWindow() {
     });
     win.loadFile(path.join(__dirname, '..', 'index.html'));
 
-    // 调试自测钩子：以 APP_SELFTEST=1 启动时，自动验证界面状态与调用链路
+    // 调试自测钩子：以 APP_SELFTEST=1 启动时，自动验证界面状态与调用链路；
+    // 结果同时写入 APP_SELFTEST_OUT 指定的 JSON 文件（发行版 exe 无法捕获控制台时用）
     if (process.env.APP_SELFTEST === '1') {
         win.webContents.on('did-finish-load', () => {
             setTimeout(async () => {
+                const outPath = process.env.APP_SELFTEST_OUT;
+                const report = {};
+                const flush = () => {
+                    if (outPath) {
+                        try { fs.writeFileSync(outPath, JSON.stringify(report, null, 2), 'utf8'); } catch {}
+                    }
+                };
                 try {
                     const overlayVisible = await win.webContents.executeJavaScript(
                         "document.getElementById('apiSetupOverlay').classList.contains('visible')"
                     );
+                    report.overlayVisible = overlayVisible;
                     console.log('SELFTEST OVERLAY:', overlayVisible);
+                    flush();
+                    report.apiBadge = await win.webContents.executeJavaScript(
+                        "document.getElementById('apiStatusBadge').textContent"
+                    );
+                    console.log('SELFTEST BADGE:', report.apiBadge);
+                    flush();
                     // 弹窗打开（未配置 Key）且提供了测试 Key 时，走一遍弹窗保存流程
                     if (overlayVisible && process.env.GLM_TEST_KEY) {
                         const saveResult = await win.webContents.executeJavaScript(`
@@ -86,7 +130,9 @@ function createWindow() {
                                 return { overlayHidden: !document.getElementById('apiSetupOverlay').classList.contains('visible') };
                             })()
                         `);
+                        report.save = saveResult;
                         console.log('SELFTEST SAVE:', JSON.stringify(saveResult));
+                        flush();
                     }
                     await win.webContents.executeJavaScript(`
                         document.getElementById('grade').value = '五年级';
@@ -97,10 +143,12 @@ function createWindow() {
                         await new Promise(r => setTimeout(r, 3000));
                         const text = await win.webContents.executeJavaScript("document.getElementById('outputContent').innerText");
                         if (text && !text.includes('正在调用')) {
+                            report.result = text.slice(0, 220);
                             console.log('SELFTEST RESULT:', text.slice(0, 220).replace(/\n/g, ' | '));
                             break;
                         }
                     }
+                    flush();
                     // 麦克风探测：拿到确切错误名（NotAllowed/NotFound/NotReadable 等）
                     const micResult = await win.webContents.executeJavaScript(`
                         (navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
@@ -109,9 +157,13 @@ function createWindow() {
                                 .catch(e => 'MIC FAIL: ' + e.name + ': ' + e.message)
                             : Promise.resolve('MIC API MISSING')
                     `);
+                    report.mic = micResult;
                     console.log('SELFTEST MIC:', micResult);
+                    flush();
                 } catch (e) {
+                    report.error = e.message;
                     console.log('SELFTEST RESULT: ERROR ' + e.message);
+                    flush();
                 }
             }, 1500);
         });
@@ -134,20 +186,24 @@ ipcMain.handle('config:get', () => ({
     apiType: apiConfig.apiType,
     customUrl: apiConfig.customUrl || '',
     model: apiConfig.model || '',
-    keyMasked: apiConfig.key ? maskKey(apiConfig.key) : ''
+    keyMasked: apiConfig.key ? maskKey(apiConfig.key) : '',
+    displayName: apiDisplayName()
 }));
 
-// 配置保存：Key 传入即更新；校验通过后写入用户数据目录
-ipcMain.handle('config:save', (_event, cfg) => {
+// 配置保存：Key 传入即更新；自定义接口模型名留空时自动探测可用模型
+ipcMain.handle('config:save', async (_event, cfg) => {
     const next = { ...apiConfig };
     if (typeof cfg.apiType === 'string') next.apiType = cfg.apiType === 'custom' ? 'custom' : 'glm';
     if (typeof cfg.key === 'string' && cfg.key.trim()) next.key = cfg.key.trim();
     if (typeof cfg.customUrl === 'string') next.customUrl = cfg.customUrl.trim();
     if (typeof cfg.model === 'string') next.model = cfg.model.trim();
     if (!next.key) throw new Error('KEY_EMPTY');
+    if (next.apiType === 'custom' && next.customUrl && !next.model) {
+        try { next.model = await detectCustomModel(next); } catch { /* 探测失败则留空，调用时再试 */ }
+    }
     apiConfig = next;
     persistApiConfig();
-    return { ok: true, keyMasked: maskKey(apiConfig.key) };
+    return { ok: true, keyMasked: maskKey(apiConfig.key), model: apiConfig.model };
 });
 
 // GLM 调用走主进程 net.fetch：不受 CORS 约束，Key 与配置不出主进程
@@ -155,7 +211,23 @@ ipcMain.handle('glm:chat', async (_event, messages) => {
     if (!Array.isArray(messages) || messages.length === 0) {
         throw new Error('消息参数无效');
     }
-    const { url, model } = resolveApi();
+    if (!apiConfig.key) throw new Error('API_KEY_NOT_SET');
+    let url, model;
+    if (apiConfig.apiType === 'custom') {
+        if (!apiConfig.customUrl) throw new Error('CUSTOM_URL_NOT_SET');
+        url = normalizeCustomUrl(apiConfig.customUrl);
+        model = apiConfig.model;
+        if (!model) {
+            try {
+                model = await detectCustomModel(apiConfig);
+                if (model) { apiConfig.model = model; persistApiConfig(); }
+            } catch { /* 探测失败回退默认模型名 */ }
+        }
+        if (!model) model = GLM_PRESET.model;
+    } else {
+        url = GLM_PRESET.url;
+        model = GLM_PRESET.model;
+    }
     const resp = await net.fetch(url, {
         method: 'POST',
         headers: {
@@ -170,7 +242,7 @@ ipcMain.handle('glm:chat', async (_event, messages) => {
     });
     const data = await resp.json().catch(() => null);
     if (!resp.ok) {
-        const msg = data && data.error ? data.error.message : 'HTTP ' + resp.status;
+        const msg = data && data.error ? (data.error.message || JSON.stringify(data.error)) : 'HTTP ' + resp.status;
         throw new Error(msg);
     }
     const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;

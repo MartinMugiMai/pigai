@@ -21,6 +21,7 @@
 
     // ==================== API 设置弹窗（首次配置 / 随时修改） ====================
     const apiSettingsBtn = document.getElementById('apiSettingsBtn');
+    const apiStatusBadge = document.getElementById('apiStatusBadge');
     const apiSetupOverlay = document.getElementById('apiSetupOverlay');
     const apiTypeSelect = document.getElementById('apiTypeSelect');
     const apiKeyInput = document.getElementById('apiKeyInput');
@@ -54,10 +55,23 @@
         return key.length > 10 ? key.slice(0, 4) + '****' + key.slice(-4) : '****';
     }
 
+    // 顶部徽章：显示当前所选大模型 API 的识别名；未配置时显示"未启用大模型 API"
+    function applyApiStatus(status) {
+        if (status && status.hasKey && status.displayName) {
+            apiStatusBadge.textContent = status.displayName;
+            apiStatusBadge.classList.add('enabled');
+        } else {
+            apiStatusBadge.textContent = '未启用大模型 API';
+            apiStatusBadge.classList.remove('enabled');
+        }
+        return status;
+    }
+
     async function openApiSetup() {
         if (window.chineseAI) {
             try {
                 const s = await window.chineseAI.getConfigStatus();
+                applyApiStatus(s);
                 apiTypeSelect.value = s.apiType === 'custom' ? 'custom' : 'glm';
                 customUrlInput.value = s.customUrl || '';
                 customModelInput.value = s.model || '';
@@ -121,6 +135,7 @@
                 model: customModelInput.value.trim()
             });
             closeApiSetup();
+            window.chineseAI.getConfigStatus().then(applyApiStatus).catch(() => {});
         } catch (e) {
             alert('保存失败：' + (e.message || e));
         } finally {
@@ -194,9 +209,9 @@
         return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    // 评语渲染：按行分段，轻量处理 **加粗** 与 # 标题
+    // 评语渲染：按行分段，轻量处理 **加粗** 与 # 标题；剥离本地推理模型的 <think> 段落
     function formatReview(text) {
-        const html = escapeHtml(text)
+        const html = escapeHtml(String(text).replace(/<think>[\s\S]*?<\/think>/gi, '').trim())
             .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
             .replace(/^#{1,4}\s*/gm, '');
         return html.split('\n').map(line =>
@@ -215,7 +230,7 @@
         }
         isGenerating = true;
         generateBtn.disabled = true;
-        outputDiv.innerHTML = '<p class="output-placeholder">⏳ 正在调用 GLM 批改作文，请稍候…</p>';
+        outputDiv.innerHTML = '<p class="output-placeholder">⏳ 正在调用 大模型 批改作文，请稍候…</p>';
         try {
             const reviewText = await callGLM(form);
             outputDiv.innerHTML = formatReview(reviewText);
@@ -275,6 +290,7 @@
     // 首次运行检查：未配置 Key 时自动弹出设置窗口；浏览器模式下隐藏设置按钮
     if (window.chineseAI) {
         window.chineseAI.getConfigStatus().then(status => {
+            applyApiStatus(status);
             if (!status.hasKey) openApiSetup();
         }).catch(() => {});
     } else {

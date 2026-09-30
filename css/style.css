@@ -709,6 +709,27 @@ body {
     border-color: #c9b7a4;
 }
 
+/* API 状态徽章：未启用为灰褐，已启用为浅绿 */
+.api-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #ede4da;
+    border: 1px solid #ddd0c0;
+    border-radius: 30px;
+    padding: 4px 14px;
+    font-size: 13px;
+    color: #836f5b;
+    font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+.api-status-badge.enabled {
+    background: #dde8df;
+    border-color: #c2d4c6;
+    color: #2f4b3e;
+}
+
 /* ========= API 设置弹窗 ========= */
 .modal-overlay {
     display: none;

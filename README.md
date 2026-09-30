@@ -40,7 +40,7 @@ npm run dist:mac    # 仅 macOS（dmg）
 
 本程序**不内置任何 API Key**，采用"用户自带 Key"模式。首次运行（或点右上角 **⚙️ API 设置**）会弹出配置窗口：
 
-1. **API 类型**：默认 `GLM 官方 · glm-5.3-flash`（智谱开放平台）；也可选 `自定义接口`，额外填写 OpenAI 兼容的 API 链接与可选模型名；
+1. **API 类型**：默认 `GLM 官方 · glm-5.3-flash`（智谱开放平台）；也可选 `自定义接口`（OpenAI 兼容）——填服务地址即可（如 `http://127.0.0.1:1234`，自动补全 `/v1/chat/completions`，也可填完整路径），模型名留空会自动探测服务端可用模型（自动跳过 embedding 类）；
 2. **API Key**：直接粘贴，或点 **📥 导入 key.txt** 自动识别（把 `key.txt.example` 复制为 `key.txt` 填入自己的 Key 也可以）；
 3. 保存后配置写入系统用户数据目录（Windows 为 `%APPDATA%\pigai\config.json`），**不在项目目录、不进 git 仓库**。
 
