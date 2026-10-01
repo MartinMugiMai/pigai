@@ -690,7 +690,7 @@
     }
 
     // 组装朗诵批改提示词（数字评分满分100 + 30字评语 + 特征标签）
-    function buildReciteMessages(info, assessSummary, assessNote) {
+    function buildReciteMessages(info, assessSummary) {
         const system = [
             '你是一位资深的中小学语文朗读指导教师，负责批改学生的朗读。',
             '请依据提供的信息批改学生的朗读，并严格遵守：',
@@ -709,9 +709,7 @@
             `【朗读内容】${info.content}`,
             `【评价要求】${info.req}`,
             info.durationSec > 0 ? `【录音时长】约 ${info.durationSec} 秒` : null,
-            assessSummary
-                ? `【语音评测数据】（讯飞 suntone 实测）${JSON.stringify(assessSummary)}\n请务必结合以上读音测评数据评价读音准确度、流利度与韵律，并在评语中体现明显问题。`
-                : `【语音评测数据】暂缺（${assessNote || '未提供录音'}）。请基于朗读内容进行指导性评价。`
+            `【语音评测数据】（讯飞 suntone 实测）${JSON.stringify(assessSummary)}\n请务必结合以上读音测评数据评价读音准确度、流利度与韵律，并在评语中体现明显问题。`
         ].filter(Boolean).join('\n');
         return [
             { role: 'system', content: system },
@@ -872,44 +870,61 @@
         gradeLabel.textContent = '批改中';
         tagContainer.innerHTML = '';
 
-        // 第一步：讯飞语音评测（有音频 + 已配置时执行，朗读内容作为参照范本）
+        // ===== 第一步（强制）：讯飞语音评测 =====
+        // 流程规定：必须先取得讯飞读音测评数据，才能交给大模型批改。
+        // 无音频 / 未配置 / 评测失败 一律中止，绝不无数据评价。
+        if (!recordedBlob) {
+            scoreDisplay.textContent = '--';
+            gradeLabel.textContent = '待批改';
+            voiceStatus.textContent = '⚠️ 请先录音或上传音频';
+            assessPlaceholder.classList.add('error');
+            assessPlaceholder.textContent = '❌ 未检测到朗读音频：朗诵批改必须基于讯飞语音评测数据，请先 🎤 录音或 📂 上传音频。';
+            commentDisplay.textContent = '（未检测到录音，批改未执行。请先提供朗读音频。）';
+            isGradingRecite = false;
+            updateGradeBtnState();
+            return;
+        }
+        if (!window.chineseAI.evaluateAudio) {
+            scoreDisplay.textContent = '--';
+            gradeLabel.textContent = '待批改';
+            alert('当前应用版本不支持语音评测，无法进行朗诵批改。');
+            isGradingRecite = false;
+            updateGradeBtnState();
+            return;
+        }
+
         let assessSummary = null;
-        let assessNote = '';
+        commentDisplay.textContent = '⏳ 第一步：讯飞语音评测中…';
+        assessPlaceholder.classList.remove('error');
+        assessPlaceholder.textContent = '⏳ 正在将朗读内容与音频发送至讯飞 suntone 进行语音评测…';
         try {
-            if (!recordedBlob) {
-                assessNote = '本次未提供录音音频';
-                assessPlaceholder.classList.remove('error');
-                assessPlaceholder.textContent = '⏳ 未检测到录音：本次批改不含读音测评数据（讯飞评测已就绪，录音或上传音频后自动评测）';
-            } else if (!window.chineseAI.evaluateAudio) {
-                assessNote = '当前应用版本不支持语音评测';
-                assessPlaceholder.classList.remove('error');
-                assessPlaceholder.textContent = '⏳ 当前应用版本不支持语音评测，本次批改不含读音测评数据';
-            } else {
-                commentDisplay.textContent = '⏳ 第一步：讯飞语音评测中…';
-                assessPlaceholder.classList.remove('error');
-                assessPlaceholder.textContent = '⏳ 正在进行讯飞语音评测（suntone）…';
-                const audioBase64 = await blobToMp3Base64(recordedBlob);
-                const result = await window.chineseAI.evaluateAudio({ audioBase64, refText: info.content });
-                assessSummary = summarizeAssess(result);
-                renderAssess(assessSummary);
-            }
+            const audioBase64 = await blobToMp3Base64(recordedBlob);
+            const result = await window.chineseAI.evaluateAudio({ audioBase64, refText: info.content });
+            assessSummary = summarizeAssess(result);
+            renderAssess(assessSummary);
         } catch (e) {
             const msg = String(e.message || e);
             if (msg.includes('XF_NOT_CONFIGURED')) {
-                assessNote = '讯飞语音评测未配置';
                 assessPlaceholder.classList.add('error');
-                assessPlaceholder.textContent = '❌ 讯飞语音评测未配置（右上角 ⚙️ API 设置中可配置），本次批改不含读音测评数据';
+                assessPlaceholder.textContent = '❌ 讯飞语音评测未配置（右上角 ⚙️ API 设置中可配置 APPID / APIKey / APISecret）';
+                alert('讯飞语音评测未配置，无法进行朗诵批改。请在右上角 ⚙️ API 设置中填写讯飞凭据。');
             } else {
-                assessNote = '讯飞语音评测失败：' + msg;
                 assessPlaceholder.classList.add('error');
-                assessPlaceholder.textContent = '❌ 讯飞语音评测失败：' + msg + '（本次批改不含读音测评数据）';
+                assessPlaceholder.textContent = '❌ 讯飞语音评测失败：' + msg;
+                alert('讯飞语音评测失败，已中止本次批改：' + msg);
             }
+            scoreDisplay.textContent = '--';
+            gradeLabel.textContent = '待批改';
+            commentDisplay.textContent = '（语音评测未完成，批改已中止。请解决上图问题后重试。）';
+            isGradingRecite = false;
+            updateGradeBtnState();
+            return;
         }
 
-        // 第二步：大模型综合批改
+        // ===== 第二步：大模型综合批改（必含讯飞测评数据） =====
         commentDisplay.textContent = '⏳ 正在调用大模型批改朗读，请稍候…';
         try {
-            const reply = await window.chineseAI.reviewEssay(buildReciteMessages(info, assessSummary, assessNote));
+            const reply = await window.chineseAI.reviewEssay(buildReciteMessages(info, assessSummary));
             applyReciteResult(parseReciteResult(reply));
         } catch (err) {
             const msg = String(err.message || err);
