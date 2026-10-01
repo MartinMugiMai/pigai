@@ -300,7 +300,25 @@ function createWindow() {
                         flush();
                     }
                     const scope = process.env.APP_SELFTEST_SCOPE || 'essay';
-                    if (scope === 'recite') {
+                    if (scope === 'config-isolation') {
+                        // 配置隔离验证：custom 配置 → 切回 glm → 断言 custom 字段无残留
+                        const iso = await win.webContents.executeJavaScript(`
+                            (async () => {
+                                const out = {};
+                                await window.chineseAI.saveConfig({ apiType: 'custom', customUrl: 'http://127.0.0.1:1234', model: 'google/gemma-4-12b' });
+                                const s1 = await window.chineseAI.getConfigStatus();
+                                out.customSaved = { apiType: s1.apiType, customUrl: s1.customUrl, model: s1.model };
+                                await window.chineseAI.saveConfig({ apiType: 'glm' });
+                                const s2 = await window.chineseAI.getConfigStatus();
+                                out.glmSwitched = { apiType: s2.apiType, customUrl: s2.customUrl, model: s2.model, displayName: s2.displayName, hasKey: s2.hasKey };
+                                out.pass = s2.apiType === 'glm' && !s2.customUrl && !s2.model && s2.hasKey;
+                                return out;
+                            })()
+                        `);
+                        report.configIsolation = iso;
+                        console.log('SELFTEST CONFIG-ISOLATION:', JSON.stringify(iso));
+                        flush();
+                    } else if (scope === 'recite') {
                         // 朗诵批改链路：填标题/类型/内容 → 开始批改 → 轮询数字评分
                         await win.webContents.executeJavaScript(`
                             document.getElementById('reciteTitle').value = '九月九日忆山东兄弟 · 王维';
@@ -465,7 +483,9 @@ ipcMain.handle('config:get', () => ({
     xfAppId: apiConfig.xfAppId || ''
 }));
 
-// 配置保存：Key 传入即更新；自定义接口模型名留空时自动探测可用模型
+// 配置保存：Key 传入即更新；自定义接口模型名留空时自动探测可用模型。
+// 接口配置强制隔离：切回 GLM 官方接口时清空自定义地址与模型名，
+// 切换到自定义接口时清空模型名（由探测重新填充）——两种接口互不残留。
 ipcMain.handle('config:save', async (_event, cfg) => {
     const next = { ...apiConfig };
     if (typeof cfg.apiType === 'string') next.apiType = cfg.apiType === 'custom' ? 'custom' : 'glm';
@@ -475,13 +495,21 @@ ipcMain.handle('config:save', async (_event, cfg) => {
     if (typeof cfg.xfAppId === 'string' && cfg.xfAppId.trim()) next.xfAppId = cfg.xfAppId.trim();
     if (typeof cfg.xfApiKey === 'string' && cfg.xfApiKey.trim()) next.xfApiKey = cfg.xfApiKey.trim();
     if (typeof cfg.xfApiSecret === 'string' && cfg.xfApiSecret.trim()) next.xfApiSecret = cfg.xfApiSecret.trim();
+    if (next.apiType === 'glm') {
+        // 接口隔离：GLM 官方模式不保留自定义接口的地址与模型名
+        next.customUrl = '';
+        next.model = '';
+    }
     if (!next.key) throw new Error('KEY_EMPTY');
     if (next.apiType === 'custom' && next.customUrl && !next.model) {
         try { next.model = await detectCustomModel(next); } catch { /* 探测失败则留空，调用时再试 */ }
     }
     apiConfig = next;
     persistApiConfig();
-    pushLog({ type: '配置', detail: `类型 ${apiConfig.apiType} · 模型 ${apiConfig.model || GLM_PRESET.model}${apiConfig.customUrl ? ' · ' + apiConfig.customUrl : ''} · Key ${maskKey(apiConfig.key)} · 讯飞评测 ${apiConfig.xfAppId ? '已配置(' + apiConfig.xfAppId + ')' : '未配置'}` });
+    const modelText = apiConfig.apiType === 'custom'
+        ? (apiConfig.model || '待探测')
+        : GLM_PRESET.model;
+    pushLog({ type: '配置', detail: `类型 ${apiConfig.apiType} · 模型 ${modelText}${apiConfig.apiType === 'custom' ? ' · ' + apiConfig.customUrl : ''} · Key ${maskKey(apiConfig.key)} · 讯飞评测 ${apiConfig.xfAppId ? '已配置(' + apiConfig.xfAppId + ')' : '未配置'}` });
     return { ok: true, keyMasked: maskKey(apiConfig.key), model: apiConfig.model };
 });
 
