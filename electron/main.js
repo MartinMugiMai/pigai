@@ -6,7 +6,7 @@
 //   通过 IPC 与渲染层交互：渲染层只能拿到掩码状态，拿不到完整 Key
 // - GLM 调用走主进程 net.fetch（无 CORS 限制）
 // ============================================================
-const { app, BrowserWindow, session, ipcMain, net, dialog, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, session, ipcMain, net, dialog, shell, systemPreferences, Menu } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const xfyun = require('./xfyun');
@@ -41,6 +41,25 @@ function pushBackend(entry) {
 // Electron 开启 AudioServiceOutOfProcess 时，macOS（含 Intel 的 macOS 12 与
 // Apple Silicon 新版系统）上 getUserMedia 常采集到全零静音流，必须回退进程内采集。
 app.commandLine.appendSwitch('disable-features', 'AudioServiceOutOfProcess');
+
+// 输入框右键菜单：所有窗口的输入框/文本域启用剪切、复制、粘贴、全选（中文菜单）
+app.on('web-contents-created', (_event, wc) => {
+    wc.on('context-menu', (_e, props) => {
+        if (props.isEditable) {
+            Menu.buildFromTemplate([
+                { role: 'cut', label: '剪切' },
+                { role: 'copy', label: '复制' },
+                { role: 'paste', label: '粘贴' },
+                { type: 'separator' },
+                { role: 'selectAll', label: '全选' }
+            ]).popup({ window: BrowserWindow.fromWebContents(wc) || undefined });
+        } else if (props.selectionText && props.selectionText.trim()) {
+            Menu.buildFromTemplate([
+                { role: 'copy', label: '复制' }
+            ]).popup({ window: BrowserWindow.fromWebContents(wc) || undefined });
+        }
+    });
+});
 
 // 开发模式（npm start）与打包发行版使用各自独立的用户数据目录：
 // 调试期的 API 配置不会影响发行版的"首次运行"体验
@@ -156,7 +175,9 @@ function buildStatus() {
         canSwitch: others.length > 0,
         switchTarget: others[0] === 'glm' ? 'GLM 官方' : (others[0] === 'custom' ? '自定义接口' : ''),
         xfConfigured: Boolean(apiConfig.xfAppId && apiConfig.xfApiKey && apiConfig.xfApiSecret),
-        xfAppId: apiConfig.xfAppId || ''
+        xfAppId: apiConfig.xfAppId || '',
+        xfApiKeyMasked: apiConfig.xfApiKey ? maskKey(apiConfig.xfApiKey) : '',
+        xfApiSecretMasked: apiConfig.xfApiSecret ? maskKey(apiConfig.xfApiSecret) : ''
     };
 }
 
@@ -388,6 +409,16 @@ function createWindow() {
                         const iso = await win.webContents.executeJavaScript(`
                             (async () => {
                                 const out = {};
+                                // 讯飞凭据保存断言（修复验证：保存载荷必须携带讯飞字段）
+                                await window.chineseAI.saveConfig({ apiType: 'glm', xfAppId: '29a5c4d5', xfApiKey: 'c29eeb7a3d1dc57575ac21f0aa85f542', xfApiSecret: 'ZDAwZTIzZTQ2YjY1YjM4Nzg2N2Q2NmRl' });
+                                let s0 = await window.chineseAI.getConfigStatus();
+                                out.xfSaved = { configured: s0.xfConfigured, appId: s0.xfAppId, keyMasked: s0.xfApiKeyMasked, secretMasked: s0.xfApiSecretMasked };
+                                out.xfSavePass = s0.xfConfigured === true;
+                                // 起始状态归一到 glm（上一次测试的结束状态可能是 custom）
+                                if (s0.active !== 'glm' && s0.glmConfigured) {
+                                    await window.chineseAI.switchApi();
+                                    s0 = await window.chineseAI.getConfigStatus();
+                                }
                                 // GLM 档案（Key 留空沿用已存）
                                 await window.chineseAI.saveConfig({ apiType: 'glm' });
                                 const s1 = await window.chineseAI.getConfigStatus();
@@ -403,9 +434,18 @@ function createWindow() {
                                 await window.chineseAI.switchApi();
                                 const s4 = await window.chineseAI.getConfigStatus();
                                 out.switchToGlm = { active: s4.active, llmConfigured: s4.llmConfigured, customDataPreserved: s4.customUrl === 'http://127.0.0.1:1234' && s4.customModel === 'qwen3.5-4b' };
-                                out.pass = s1.glmConfigured && s2.customConfigured && s2.glmConfigured
-                                    && s3.active === 'custom' && s3.llmConfigured
-                                    && s4.active === 'glm' && s4.customDataPreserved;
+                                const subs = {
+                                    c_xfSave: out.xfSavePass,
+                                    c1_glm: s1.glmConfigured,
+                                    c2_custom: s2.customConfigured,
+                                    c2_glm: s2.glmConfigured,
+                                    c3_activeCustom: s3.active === 'custom',
+                                    c3_llm: s3.llmConfigured,
+                                    c4_activeGlm: s4.active === 'glm',
+                                    c4_preserved: s4.customUrl === 'http://127.0.0.1:1234' && s4.customModel === 'qwen3.5-4b'
+                                };
+                                out.subs = subs;
+                                out.allPass = Object.values(subs).every(Boolean) ? 'yes' : 'no';
                                 return out;
                             })()
                         `);

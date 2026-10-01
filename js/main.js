@@ -126,6 +126,12 @@
                 keyFileHint.textContent = '仅建议智谱 Key 用 TXT 导入';
                 prefillApiForm(s.active);
                 toggleCustomFields();
+                // 讯飞凭据状态回填：APPID 显示值，Key/Secret 显示掩码提示
+                xfAppIdInput.value = s.xfAppId || '';
+                const xfState = s.xfConfigured ? '已配置（留空保持不变）' : '未配置';
+                xfApiKeyInput.placeholder = '讯飞 APIKey ' + xfState;
+                xfApiSecretInput.placeholder = '讯飞 APISecret ' + xfState;
+                updateXfHints(s);
                 updateAssistantStatus();
                 apiSetupOverlay.classList.add('visible');
                 return;
@@ -136,6 +142,7 @@
         keyFileHint.textContent = '仅建议智谱 Key 用 TXT 导入';
         toggleCustomFields();
         updateKeyMask('glm');
+        updateXfHints(null);
         apiSetupOverlay.classList.add('visible');
     }
 
@@ -208,6 +215,37 @@
         updateKeyMask(this.value);
     });
 
+    // 状态标签可点击：点击刷新对应配置状态；未配置时气泡提示
+    apiStatusBadge.addEventListener('click', async function() {
+        if (!window.chineseAI) return;
+        try {
+            const s = await window.chineseAI.getConfigStatus();
+            lastStatus = s;
+            applyApiStatus(s);
+            showToast(s.llmConfigured
+                ? `大模型 API 状态正常：${s.displayName}`
+                : '大模型 API 未配置：请点击 ⚙️ API 设置 完成 Key 配置');
+        } catch (e) {
+            showToast('状态刷新失败：' + (e.message || e));
+        }
+    });
+
+    assistantStatusBadge.addEventListener('click', async function() {
+        if (!window.chineseAI) return;
+        const st = await updateAssistantStatus();
+        try {
+            const s = await window.chineseAI.getConfigStatus();
+            const xfOk = Boolean(s.xfConfigured);
+            const micOk = st.micText === '已接入';
+            if (!xfOk && !micOk) showToast('讯飞语音评测未配置，且未检测到麦克风设备');
+            else if (!xfOk) showToast('讯飞语音评测未配置：请在 ⚙️ API 设置中填写 APPID / APIKey / APISecret');
+            else if (!micOk) showToast('讯飞已配置，但未检测到麦克风设备：录音功能不可用');
+            else showToast('讯飞语音评测与麦克风均正常');
+        } catch (e) {
+            showToast('状态刷新失败：' + (e.message || e));
+        }
+    });
+
     // 导入 key.txt：读文件内容，自动识别 Key 填入输入框
     importKeyBtn.addEventListener('click', () => keyFileInput.click());
     keyFileInput.addEventListener('change', function() {
@@ -247,6 +285,10 @@
             cfg.customUrl = customUrlInput.value.trim();
             cfg.model = customModelInput.value.trim();
         }
+        // 讯飞凭据随每次保存一起提交（主进程空值不覆盖，留空即保持已存值）
+        cfg.xfAppId = xfAppIdInput.value.trim();
+        cfg.xfApiKey = xfApiKeyInput.value.trim();
+        cfg.xfApiSecret = xfApiSecretInput.value.trim();
         try {
             apiSaveBtn.disabled = true;
             const s = await window.chineseAI.saveConfig(cfg);
@@ -261,7 +303,37 @@
         }
     });
 
-    // 讯飞评测 + 麦克风接入状态标签（显示在顶部信息栏）
+    // 讯飞凭据回显：三个输入框下各显示一行当前值（APPID 全文，Key/Secret 掩码）
+    function updateXfHints(s) {
+        const set = (id, text, visible) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = text;
+            el.hidden = !visible;
+        };
+        const configured = Boolean(s && s.xfConfigured);
+        set('xfAppIdHint', `当前APPID："${s ? s.xfAppId : ''}"`, configured);
+        set('xfApiKeyHint', `当前API Key："${s ? s.xfApiKeyMasked : ''}"`, configured);
+        set('xfApiSecretHint', `当前API Secret："${s ? s.xfApiSecretMasked : ''}"`, configured);
+    }
+
+    // 气泡提示：顶部居中弹出，数秒后自动消失
+    let toastTimer = null;
+    function showToast(msg) {
+        let t = document.getElementById('pigaiToast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'pigaiToast';
+            t.className = 'toast';
+            document.body.appendChild(t);
+        }
+        t.textContent = msg;
+        t.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+    }
+
+    // 讯飞评测 + 麦克风接入状态标签（显示在顶部信息栏）；返回状态供徽章点击使用
     async function updateAssistantStatus() {
         let micText = '未知';
         try {
@@ -280,6 +352,7 @@
             } catch { /* 保持未配置 */ }
         }
         if (assistantStatusBadge) assistantStatusBadge.textContent = `讯飞 ${xfText} · 麦克风 ${micText}`;
+        return { xfText, micText };
     }
 
     // ==================== GLM 接口（Electron 主进程代理） ====================

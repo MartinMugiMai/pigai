@@ -723,7 +723,33 @@ body {
     font-family: 'Segoe UI', 'PingFang SC', sans-serif;
     white-space: nowrap;
     transition: all 0.15s ease;
+    cursor: pointer;
+    user-select: none;
 }
+.api-status-badge:hover {
+    border-color: #b8a48e;
+    background: #e6dbd0;
+}
+
+/* 顶部气泡提示（Toast） */
+.toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #4d3a2a;
+    color: #fdf6ec;
+    padding: 10px 24px;
+    border-radius: 30px;
+    box-shadow: 0 8px 22px rgba(60, 40, 20, 0.35);
+    z-index: 999;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
+    max-width: 80vw;
+}
+.toast.show { opacity: 1; }
 .api-status-badge.enabled {
     background: #dde8df;
     border-color: #c2d4c6;
