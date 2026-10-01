@@ -23,6 +23,7 @@
     const apiSettingsBtn = document.getElementById('apiSettingsBtn');
     const apiStatusBadge = document.getElementById('apiStatusBadge');
     const assistantStatusBadge = document.getElementById('assistantStatusBadge');
+    const switchApiBtn = document.getElementById('switchApiBtn');
     const logWindowBtn = document.getElementById('logWindowBtn');
     const recordingsFolderBtn = document.getElementById('recordingsFolderBtn');
     const backendOutputBtn = document.getElementById('backendOutputBtn');
@@ -64,48 +65,77 @@
         return key.length > 10 ? key.slice(0, 4) + '****' + key.slice(-4) : '****';
     }
 
-    // 顶部徽章：显示当前所选大模型 API 的识别名；未配置时显示"未启用大模型 API"
-    // llmConfigured 同时驱动作文批改/朗诵批改按钮的可用状态
+    // 顶部徽章：显示当前激活接口的识别名；未配置时显示"未启用大模型 API"
+    // llmConfigured（当前激活接口是否可用）驱动两个批改按钮的状态
     let llmConfigured = false;
+    let lastStatus = null;
 
     function applyApiStatus(status) {
-        llmConfigured = Boolean(status && status.hasKey);
-        if (status && status.hasKey && status.displayName) {
+        llmConfigured = Boolean(status && status.llmConfigured);
+        if (llmConfigured && status.displayName) {
             apiStatusBadge.textContent = status.displayName;
             apiStatusBadge.classList.add('enabled');
         } else {
             apiStatusBadge.textContent = '未启用大模型 API';
             apiStatusBadge.classList.remove('enabled');
         }
+        if (switchApiBtn) {
+            switchApiBtn.disabled = !status || !status.canSwitch;
+            switchApiBtn.title = status && status.canSwitch
+                ? `切换到 ${status.switchTarget}（热切换，不影响两套配置）`
+                : '需要两个接口都已配置才能切换';
+        }
         updateGenerateBtnState();
         updateGradeBtnState();
         return status;
+    }
+
+    // 按弹窗当前选择的接口类型回填表单（Key 留空 = 沿用该接口已存 Key）
+    function prefillApiForm(type) {
+        if (!lastStatus) return;
+        if (type === 'custom') {
+            customUrlInput.value = lastStatus.customUrl || '';
+            customModelInput.value = lastStatus.customModel || '';
+            apiKeyInput.placeholder = lastStatus.customKeyMasked
+                ? `已配置 ${lastStatus.customKeyMasked}（留空保持不变）` : '未配置';
+        } else {
+            apiKeyInput.placeholder = lastStatus.glmKeyMasked
+                ? `已配置 ${lastStatus.glmKeyMasked}（留空保持不变）` : '未配置';
+        }
+        updateKeyMask(type);
+    }
+
+    function updateKeyMask(type) {
+        const masked = lastStatus ? (type === 'custom' ? lastStatus.customKeyMasked : lastStatus.glmKeyMasked) : '';
+        if (masked) {
+            keyMask.textContent = '当前 Key：' + masked;
+            keyMask.style.display = '';
+        } else {
+            keyMask.style.display = 'none';
+        }
     }
 
     async function openApiSetup() {
         if (window.chineseAI) {
             try {
                 const s = await window.chineseAI.getConfigStatus();
+                lastStatus = s;
                 applyApiStatus(s);
-                apiTypeSelect.value = s.apiType === 'custom' ? 'custom' : 'glm';
-                customUrlInput.value = s.customUrl || '';
-                customModelInput.value = s.model || '';
-                if (s.hasKey) {
-                    keyMask.textContent = '当前 Key：' + s.keyMasked;
-                    keyMask.style.display = '';
-                } else {
-                    keyMask.style.display = 'none';
-                }
-                xfAppIdInput.value = s.xfAppId || '';
-                const xfState = s.xfConfigured ? '已配置（留空保持不变）' : '未配置';
-                xfApiKeyInput.placeholder = '讯飞 APIKey ' + xfState;
-                xfApiSecretInput.placeholder = '讯飞 APISecret ' + xfState;
+                apiTypeSelect.value = s.active;
+                apiKeyInput.value = '';
+                keyFileHint.textContent = '仅建议智谱 Key 用 TXT 导入';
+                prefillApiForm(s.active);
+                toggleCustomFields();
+                updateAssistantStatus();
+                apiSetupOverlay.classList.add('visible');
+                return;
             } catch { /* 读取失败则保持空表单 */ }
         }
+        lastStatus = null;
         apiKeyInput.value = '';
         keyFileHint.textContent = '仅建议智谱 Key 用 TXT 导入';
         toggleCustomFields();
-        updateAssistantStatus();
+        updateKeyMask('glm');
         apiSetupOverlay.classList.add('visible');
     }
 
@@ -123,12 +153,14 @@
         if (window.chineseAI) window.chineseAI.openBackendWindow();
     });
 
-    // 一键清空大模型 API 信息（Key / 接口地址 / 模型名）
+    // 一键清空当前所选接口的 API 信息（互不影响另一接口）
     clearLlmBtn.addEventListener('click', async function() {
         if (!window.chineseAI) return;
-        if (!confirm('确认清空大模型 API 信息（Key、接口地址、模型名）？清空后"Generate Review"与"开始批改"将不可用，需重新配置。')) return;
+        const scope = apiTypeSelect.value;
+        const name = scope === 'custom' ? '自定义接口（接口地址 / 模型名 / Key）' : 'GLM 官方（Key）';
+        if (!confirm(`确认清空 ${name} 的 API 信息？清空后该接口不可用，需重新配置。`)) return;
         try {
-            await window.chineseAI.clearConfig('llm');
+            await window.chineseAI.clearConfig(scope);
             await openApiSetup();
         } catch (e) {
             alert('清空失败：' + (e.message || e));
@@ -147,6 +179,21 @@
         }
     });
 
+    // 热切换大模型接口（另一接口已配置时可用，不清对方数据）
+    switchApiBtn.addEventListener('click', async function() {
+        if (!window.chineseAI) return;
+        switchApiBtn.disabled = true;
+        try {
+            const s = await window.chineseAI.switchApi();
+            lastStatus = s;
+            applyApiStatus(s);
+            updateAssistantStatus();
+        } catch (e) {
+            switchApiBtn.disabled = false;
+            alert('切换失败：' + (e.message || e));
+        }
+    });
+
     // 用资源管理器 / Finder 打开录音目录
     recordingsFolderBtn.addEventListener('click', function() {
         if (window.chineseAI) window.chineseAI.openRecordingsFolder();
@@ -154,7 +201,12 @@
 
     apiSettingsBtn.addEventListener('click', openApiSetup);
     apiCancelBtn.addEventListener('click', closeApiSetup);
-    apiTypeSelect.addEventListener('change', toggleCustomFields);
+    apiTypeSelect.addEventListener('change', function() {
+        apiKeyInput.value = '';
+        toggleCustomFields();
+        prefillApiForm(this.value);
+        updateKeyMask(this.value);
+    });
 
     // 导入 key.txt：读文件内容，自动识别 Key 填入输入框
     importKeyBtn.addEventListener('click', () => keyFileInput.click());
@@ -175,34 +227,33 @@
     });
 
     apiSaveBtn.addEventListener('click', async function() {
+        const type = apiTypeSelect.value;
         const key = apiKeyInput.value.trim();
-        const isCustom = apiTypeSelect.value === 'custom';
-        if (isCustom && !/^https?:\/\//i.test(customUrlInput.value.trim())) {
+        if (type === 'custom' && !/^https?:\/\//i.test(customUrlInput.value.trim())) {
             alert('自定义接口需要填写以 http(s):// 开头的 API 链接');
             return;
         }
-        // Key 留空 = 沿用已存储的 Key；仅在本地完全没有 Key 时要求填写
-        const cfg = {
-            apiType: apiTypeSelect.value,
-            customUrl: customUrlInput.value.trim(),
-            model: customModelInput.value.trim(),
-            xfAppId: xfAppIdInput.value.trim(),
-            xfApiKey: xfApiKeyInput.value.trim(),
-            xfApiSecret: xfApiSecretInput.value.trim()
-        };
-        if (key) cfg.key = key;
-        try {
-            if (!key) {
-                const current = await window.chineseAI.getConfigStatus();
-                if (!current || !current.hasKey) {
-                    alert('请填写 API Key（当前未存储任何 Key）');
-                    return;
-                }
+        // Key 留空 = 沿用该接口档案已存储的 Key；该接口从未配置 Key 时要求填写
+        if (!key && lastStatus) {
+            const configured = type === 'glm' ? lastStatus.glmConfigured : lastStatus.customConfigured;
+            if (!configured) {
+                alert('请填写 API Key（该接口当前未存储 Key）');
+                return;
             }
+        }
+        const cfg = { apiType: type };
+        if (key) cfg.key = key;
+        if (type === 'custom') {
+            cfg.customUrl = customUrlInput.value.trim();
+            cfg.model = customModelInput.value.trim();
+        }
+        try {
             apiSaveBtn.disabled = true;
-            await window.chineseAI.saveConfig(cfg);
+            const s = await window.chineseAI.saveConfig(cfg);
+            lastStatus = s;
+            applyApiStatus(s);
+            updateAssistantStatus();
             closeApiSetup();
-            window.chineseAI.getConfigStatus().then(applyApiStatus).then(updateAssistantStatus).catch(() => {});
         } catch (e) {
             alert('保存失败：' + (e.message || e));
         } finally {
@@ -410,6 +461,7 @@
     updateAssistantStatus();
     if (window.chineseAI) {
         window.chineseAI.getConfigStatus().then(status => {
+            lastStatus = status;
             applyApiStatus(status);
             if (!status.hasKey) openApiSetup();
         }).catch(() => {});
@@ -418,6 +470,7 @@
         logWindowBtn.style.display = 'none';
         recordingsFolderBtn.style.display = 'none';
         backendOutputBtn.style.display = 'none';
+        switchApiBtn.style.display = 'none';
     }
 
     // ==================== 朗诵批改逻辑（录音 → 大模型批改） ====================

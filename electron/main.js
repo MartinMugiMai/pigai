@@ -54,20 +54,69 @@ const GLM_PRESET = {
     model: 'glm-5.3-flash' // 当前最新免费档模型（推理模型，回复带思考过程）
 };
 
-// ==================== API 配置（存于用户数据目录，不进项目仓库） ====================
-let apiConfig = { apiType: 'glm', key: '', customUrl: '', model: '', xfAppId: '', xfApiKey: '', xfApiSecret: '' };
+// ==================== API 配置（两套接口独立存储，互不干扰） ====================
+// profiles.glm    ：GLM 官方（Key）
+// profiles.custom ：自定义接口（Key / 地址 / 模型名）
+// active          ：当前生效的接口；热切换只改 active，不清对方数据
+let apiConfig = {
+    active: 'glm',
+    profiles: {
+        glm: { key: '' },
+        custom: { key: '', customUrl: '', model: '' }
+    },
+    xfAppId: '', xfApiKey: '', xfApiSecret: ''
+};
 
 function configFilePath() {
     return path.join(app.getPath('userData'), 'config.json');
 }
 
 function loadApiConfig() {
+    let raw = null;
     try {
-        const raw = JSON.parse(fs.readFileSync(configFilePath(), 'utf8'));
-        if (raw && typeof raw === 'object') apiConfig = { ...apiConfig, ...raw };
+        raw = JSON.parse(fs.readFileSync(configFilePath(), 'utf8'));
     } catch {
-        // 首次运行或文件损坏：保持默认（无 Key），由渲染层弹窗引导配置
+        apiConfig = {
+            active: 'glm',
+            profiles: { glm: { key: '' }, custom: { key: '', customUrl: '', model: '' } },
+            xfAppId: '', xfApiKey: '', xfApiSecret: ''
+        };
+        return;
     }
+    if (raw && typeof raw === 'object' && raw.profiles && raw.profiles.glm) {
+        // 新格式（双档案）
+        apiConfig = {
+            active: raw.active === 'custom' ? 'custom' : 'glm',
+            profiles: {
+                glm: { key: raw.profiles.glm.key || '' },
+                custom: {
+                    key: raw.profiles.custom.key || '',
+                    customUrl: raw.profiles.custom.customUrl || '',
+                    model: raw.profiles.custom.model || ''
+                }
+            },
+            xfAppId: raw.xfAppId || '',
+            xfApiKey: raw.xfApiKey || '',
+            xfApiSecret: raw.xfApiSecret || ''
+        };
+        return;
+    }
+    // 旧格式（单套 Key）迁移：Key 按迁移时的接口类型归属到对应档案
+    const migrated = {
+        active: (raw && raw.apiType === 'custom') ? 'custom' : 'glm',
+        profiles: { glm: { key: '' }, custom: { key: '', customUrl: '', model: '' } },
+        xfAppId: (raw && raw.xfAppId) || '',
+        xfApiKey: (raw && raw.xfApiKey) || '',
+        xfApiSecret: (raw && raw.xfApiSecret) || ''
+    };
+    if (raw && typeof raw.key === 'string' && raw.key.trim()) {
+        if (migrated.active === 'custom') migrated.profiles.custom.key = raw.key.trim();
+        else migrated.profiles.glm.key = raw.key.trim();
+    }
+    if (raw && typeof raw.customUrl === 'string') migrated.profiles.custom.customUrl = raw.customUrl.trim();
+    if (raw && typeof raw.model === 'string') migrated.profiles.custom.model = raw.model.trim();
+    apiConfig = migrated;
+    persistApiConfig(); // 迁移结果落盘
 }
 
 function persistApiConfig() {
@@ -79,13 +128,46 @@ function maskKey(key) {
     return key.length > 10 ? key.slice(0, 4) + '****' + key.slice(-4) : '****';
 }
 
-// 当前所选 API 的识别名称（供界面徽章显示）；未配置 Key 时返回空
+// 某接口是否已配置可用：GLM 需 Key；自定义需接口地址（本地服务可免 Key）
+function isProfileConfigured(type) {
+    const p = apiConfig.profiles[type];
+    if (!p) return false;
+    return type === 'glm' ? Boolean(p.key) : Boolean(p.customUrl);
+}
+
+function activeProfile() {
+    return apiConfig.profiles[apiConfig.active] || { key: '', customUrl: '', model: '' };
+}
+
+function buildStatus() {
+    const llmConfigured = isProfileConfigured(apiConfig.active);
+    const others = ['glm', 'custom'].filter(t => t !== apiConfig.active && isProfileConfigured(t));
+    return {
+        active: apiConfig.active,
+        hasKey: llmConfigured,
+        llmConfigured,
+        displayName: llmConfigured ? apiDisplayName() : '',
+        glmConfigured: isProfileConfigured('glm'),
+        customConfigured: isProfileConfigured('custom'),
+        glmKeyMasked: apiConfig.profiles.glm.key ? maskKey(apiConfig.profiles.glm.key) : '',
+        customKeyMasked: apiConfig.profiles.custom.key ? maskKey(apiConfig.profiles.custom.key) : '',
+        customUrl: apiConfig.profiles.custom.customUrl || '',
+        customModel: apiConfig.profiles.custom.model || '',
+        canSwitch: others.length > 0,
+        switchTarget: others[0] === 'glm' ? 'GLM 官方' : (others[0] === 'custom' ? '自定义接口' : ''),
+        xfConfigured: Boolean(apiConfig.xfAppId && apiConfig.xfApiKey && apiConfig.xfApiSecret),
+        xfAppId: apiConfig.xfAppId || ''
+    };
+}
+
+// 当前生效接口的识别名称（供界面徽章显示）；未配置时返回空
 function apiDisplayName() {
-    if (!apiConfig.key) return '';
-    if (apiConfig.apiType === 'custom') {
-        let host = apiConfig.customUrl;
-        try { host = new URL(apiConfig.customUrl).host; } catch { /* 保留原值 */ }
-        return `自定义 · ${host} · ${apiConfig.model || GLM_PRESET.model}`;
+    if (!isProfileConfigured(apiConfig.active)) return '';
+    if (apiConfig.active === 'custom') {
+        const p = apiConfig.profiles.custom;
+        let host = p.customUrl;
+        try { host = new URL(p.customUrl).host; } catch { /* 保留原值 */ }
+        return `自定义 · ${host}${p.model ? ' · ' + p.model : ''}`;
     }
     return `GLM 官方 · ${GLM_PRESET.model}`;
 }
@@ -302,17 +384,28 @@ function createWindow() {
                     const scope = process.env.APP_SELFTEST_SCOPE || 'essay';
 
                     if (scope === 'config-isolation') {
-                        // 配置隔离验证：custom 配置 → 切回 glm → 断言 custom 字段无残留
+                        // 双档案独立性验证：两套配置互不干扰 + 热切换正常
                         const iso = await win.webContents.executeJavaScript(`
                             (async () => {
                                 const out = {};
-                                await window.chineseAI.saveConfig({ apiType: 'custom', customUrl: 'http://127.0.0.1:1234', model: 'google/gemma-4-12b' });
-                                const s1 = await window.chineseAI.getConfigStatus();
-                                out.customSaved = { apiType: s1.apiType, customUrl: s1.customUrl, model: s1.model };
+                                // GLM 档案（Key 留空沿用已存）
                                 await window.chineseAI.saveConfig({ apiType: 'glm' });
+                                const s1 = await window.chineseAI.getConfigStatus();
+                                out.glm = { active: s1.active, llmConfigured: s1.llmConfigured, glmConfigured: s1.glmConfigured };
+                                // 自定义档案（不影响 GLM 档案）
+                                await window.chineseAI.saveConfig({ apiType: 'custom', customUrl: 'http://127.0.0.1:1234', model: 'qwen3.5-4b' });
                                 const s2 = await window.chineseAI.getConfigStatus();
-                                out.glmSwitched = { apiType: s2.apiType, customUrl: s2.customUrl, model: s2.model, displayName: s2.displayName, hasKey: s2.hasKey };
-                                out.pass = s2.apiType === 'glm' && !s2.customUrl && !s2.model && s2.hasKey;
+                                out.custom = { customConfigured: s2.customConfigured, customUrl: s2.customUrl, customModel: s2.customModel, glmConfigured: s2.glmConfigured };
+                                // 热切换 custom → glm → 确认自定义数据仍在、GLM 生效
+                                await window.chineseAI.switchApi();
+                                const s3 = await window.chineseAI.getConfigStatus();
+                                out.switchToCustom = { active: s3.active, llmConfigured: s3.llmConfigured, displayName: s3.displayName };
+                                await window.chineseAI.switchApi();
+                                const s4 = await window.chineseAI.getConfigStatus();
+                                out.switchToGlm = { active: s4.active, llmConfigured: s4.llmConfigured, customDataPreserved: s4.customUrl === 'http://127.0.0.1:1234' && s4.customModel === 'qwen3.5-4b' };
+                                out.pass = s1.glmConfigured && s2.customConfigured && s2.glmConfigured
+                                    && s3.active === 'custom' && s3.llmConfigured
+                                    && s4.active === 'glm' && s4.customDataPreserved;
                                 return out;
                             })()
                         `);
@@ -467,54 +560,46 @@ async function ensureMacMicrophoneAccess() {
     }
 }
 
-// 配置查询：渲染层只能拿到掩码 Key 与非敏感字段
-ipcMain.handle('config:get', () => ({
-    hasKey: Boolean(apiConfig.key),
-    apiType: apiConfig.apiType,
-    customUrl: apiConfig.customUrl || '',
-    model: apiConfig.model || '',
-    keyMasked: apiConfig.key ? maskKey(apiConfig.key) : '',
-    displayName: apiDisplayName(),
-    xfConfigured: Boolean(apiConfig.xfAppId && apiConfig.xfApiKey && apiConfig.xfApiSecret),
-    xfAppId: apiConfig.xfAppId || ''
-}));
+// 配置查询：返回双档案状态（各接口掩码 Key），渲染层拿不到完整 Key
+ipcMain.handle('config:get', () => buildStatus());
 
-// 配置保存：Key 传入即更新；自定义接口模型名留空时自动探测可用模型。
-// 接口配置强制隔离：切回 GLM 官方接口时清空自定义地址与模型名，
-// 切换到自定义接口时清空模型名（由探测重新填充）——两种接口互不残留。
+// 配置保存：写入 cfg.apiType 指定接口的档案（Key 留空 = 沿用该档案已存 Key）
 ipcMain.handle('config:save', async (_event, cfg) => {
-    const next = { ...apiConfig };
-    if (typeof cfg.apiType === 'string') next.apiType = cfg.apiType === 'custom' ? 'custom' : 'glm';
-    if (typeof cfg.key === 'string' && cfg.key.trim()) next.key = cfg.key.trim();
-    if (typeof cfg.customUrl === 'string') next.customUrl = cfg.customUrl.trim();
-    if (typeof cfg.model === 'string') next.model = cfg.model.trim();
-    if (typeof cfg.xfAppId === 'string' && cfg.xfAppId.trim()) next.xfAppId = cfg.xfAppId.trim();
-    if (typeof cfg.xfApiKey === 'string' && cfg.xfApiKey.trim()) next.xfApiKey = cfg.xfApiKey.trim();
-    if (typeof cfg.xfApiSecret === 'string' && cfg.xfApiSecret.trim()) next.xfApiSecret = cfg.xfApiSecret.trim();
-    if (next.apiType === 'glm') {
-        // 接口隔离：GLM 官方模式不保留自定义接口的地址与模型名
-        next.customUrl = '';
-        next.model = '';
+    const type = (cfg && cfg.apiType === 'custom') ? 'custom' : (cfg && cfg.apiType === 'glm' ? 'glm' : apiConfig.active);
+    const profile = apiConfig.profiles[type];
+    if (typeof cfg.key === 'string' && cfg.key.trim()) profile.key = cfg.key.trim();
+    if (type === 'custom') {
+        if (typeof cfg.customUrl === 'string') profile.customUrl = cfg.customUrl.trim();
+        if (typeof cfg.model === 'string') profile.model = cfg.model.trim();
+        if (profile.customUrl && !profile.model) {
+            try { profile.model = await detectCustomModel({ customUrl: profile.customUrl, key: profile.key }); } catch { /* 探测失败留空，调用时再试 */ }
+        }
     }
-    if (!next.key) throw new Error('KEY_EMPTY');
-    if (next.apiType === 'custom' && next.customUrl && !next.model) {
-        try { next.model = await detectCustomModel(next); } catch { /* 探测失败则留空，调用时再试 */ }
-    }
-    apiConfig = next;
+    if (typeof cfg.xfAppId === 'string' && cfg.xfAppId.trim()) apiConfig.xfAppId = cfg.xfAppId.trim();
+    if (typeof cfg.xfApiKey === 'string' && cfg.xfApiKey.trim()) apiConfig.xfApiKey = cfg.xfApiKey.trim();
+    if (typeof cfg.xfApiSecret === 'string' && cfg.xfApiSecret.trim()) apiConfig.xfApiSecret = cfg.xfApiSecret.trim();
     persistApiConfig();
-    const modelText = apiConfig.apiType === 'custom'
-        ? (apiConfig.model || '待探测')
-        : GLM_PRESET.model;
-    pushLog({ type: '配置', detail: `类型 ${apiConfig.apiType} · 模型 ${modelText}${apiConfig.apiType === 'custom' ? ' · ' + apiConfig.customUrl : ''} · Key ${maskKey(apiConfig.key)} · 讯飞评测 ${apiConfig.xfAppId ? '已配置(' + apiConfig.xfAppId + ')' : '未配置'}` });
-    return { ok: true, keyMasked: maskKey(apiConfig.key), model: apiConfig.model };
+    const modelText = type === 'custom' ? (profile.model || '待探测') : GLM_PRESET.model;
+    pushLog({ type: '配置', detail: `${type === 'custom' ? '自定义接口' : 'GLM 官方'} 配置已保存 · 模型 ${modelText}${type === 'custom' ? ' · ' + profile.customUrl : ''} · Key ${profile.key ? maskKey(profile.key) : '未设置'} · 讯飞评测 ${apiConfig.xfAppId ? '已配置(' + apiConfig.xfAppId + ')' : '未配置'}` });
+    return buildStatus();
 });
 
-// 一键清空：scope 'llm'（大模型 Key/地址/模型）或 'xf'（讯飞 APPID/Key/Secret）
+// 热切换大模型接口：仅在另一接口已配置时允许；只改 active，不动两套档案数据
+ipcMain.handle('config:switch', () => {
+    const others = ['glm', 'custom'].filter(t => t !== apiConfig.active && isProfileConfigured(t));
+    if (others.length === 0) throw new Error('NO_OTHER_CONFIGURED');
+    apiConfig.active = others[0];
+    persistApiConfig();
+    pushLog({ type: '配置', detail: `热切换大模型接口 → ${apiConfig.active === 'glm' ? 'GLM 官方' : '自定义接口'}` });
+    return buildStatus();
+});
+
+// 一键清空：scope 'glm' | 'custom' | 'xf'
 ipcMain.handle('config:clear', (_event, scope) => {
-    if (scope === 'llm') {
-        apiConfig.key = '';
-        apiConfig.customUrl = '';
-        apiConfig.model = '';
+    if (scope === 'glm') {
+        apiConfig.profiles.glm.key = '';
+    } else if (scope === 'custom') {
+        apiConfig.profiles.custom = { key: '', customUrl: '', model: '' };
     } else if (scope === 'xf') {
         apiConfig.xfAppId = '';
         apiConfig.xfApiKey = '';
@@ -523,8 +608,8 @@ ipcMain.handle('config:clear', (_event, scope) => {
         throw new Error('未知清空范围');
     }
     persistApiConfig();
-    pushLog({ type: '配置', detail: `已清空 ${scope === 'llm' ? '大模型' : '讯飞'} API 信息` });
-    return { ok: true, displayName: apiDisplayName() };
+    pushLog({ type: '配置', detail: `已清空 ${scope === 'glm' ? 'GLM 官方' : scope === 'custom' ? '自定义接口' : '讯飞'} API 信息` });
+    return buildStatus();
 });
 
 // 通用文本保存（作文批改 Save 按钮）：系统保存对话框
@@ -571,27 +656,31 @@ ipcMain.handle('xfyun:evaluate', async (_event, payload) => {
     }
 });
 
-// GLM 调用走主进程 net.fetch：不受 CORS 约束，Key 与配置不出主进程
+// 大模型调用走主进程 net.fetch：不受 CORS 约束，Key 与配置不出主进程。
+// 按当前激活接口（active）取对应档案的 Key 与参数
 ipcMain.handle('glm:chat', async (_event, messages) => {
     if (!Array.isArray(messages) || messages.length === 0) {
         throw new Error('消息参数无效');
     }
-    if (!apiConfig.key) throw new Error('API_KEY_NOT_SET');
-    let url, model;
-    if (apiConfig.apiType === 'custom') {
-        if (!apiConfig.customUrl) throw new Error('CUSTOM_URL_NOT_SET');
-        url = normalizeCustomUrl(apiConfig.customUrl);
-        model = apiConfig.model;
+    if (!isProfileConfigured(apiConfig.active)) throw new Error('API_KEY_NOT_SET');
+    let url, model, key;
+    if (apiConfig.active === 'custom') {
+        const p = apiConfig.profiles.custom;
+        if (!p.customUrl) throw new Error('CUSTOM_URL_NOT_SET');
+        url = normalizeCustomUrl(p.customUrl);
+        model = p.model;
         if (!model) {
             try {
-                model = await detectCustomModel(apiConfig);
-                if (model) { apiConfig.model = model; persistApiConfig(); }
+                model = await detectCustomModel({ customUrl: p.customUrl, key: p.key });
+                if (model) { p.model = model; persistApiConfig(); }
             } catch { /* 探测失败回退默认模型名 */ }
         }
         if (!model) model = GLM_PRESET.model;
+        key = p.key;
     } else {
         url = GLM_PRESET.url;
         model = GLM_PRESET.model;
+        key = apiConfig.profiles.glm.key;
     }
     const startedAt = Date.now();
     let logged = false;
@@ -602,7 +691,7 @@ ipcMain.handle('glm:chat', async (_event, messages) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + apiConfig.key
+                'Authorization': 'Bearer ' + key
             },
             body: JSON.stringify({
                 model,
