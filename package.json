@@ -28,6 +28,7 @@
     "files": [
       "index.html",
       "log.html",
+      "backend.html",
       "css/**/*",
       "js/**/*",
       "electron/**/*"

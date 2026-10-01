@@ -11,6 +11,32 @@ const fs = require('node:fs');
 const path = require('node:path');
 const xfyun = require('./xfyun');
 
+// ==================== 后台输出（捕获主进程 print 与渲染层 console） ====================
+const backendLog = [];
+let backendWin = null;
+let mainWinRef = null; // 主窗口引用（对话框父窗口）
+
+function pushBackend(entry) {
+    const item = { time: new Date().toLocaleString('zh-CN', { hour12: false }), ...entry };
+    backendLog.push(item);
+    if (backendLog.length > 2000) backendLog.shift();
+    if (backendWin && !backendWin.isDestroyed()) backendWin.webContents.send('backend:log-append', item);
+}
+
+// 包装主进程 console：所有输出进后台输出缓冲（终端输出保持不变）
+['log', 'info', 'warn', 'error'].forEach(level => {
+    const orig = console[level].bind(console);
+    console[level] = (...args) => {
+        orig(...args);
+        const text = args.map(a => {
+            if (typeof a === 'string') return a;
+            if (a instanceof Error) return a.stack || a.message;
+            try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ');
+        pushBackend({ source: '主进程', level, text });
+    };
+});
+
 // macOS 录音静音修复：禁用进程外音频服务。
 // Electron 开启 AudioServiceOutOfProcess 时，macOS（含 Intel 的 macOS 12 与
 // Apple Silicon 新版系统）上 getUserMedia 常采集到全零静音流，必须回退进程内采集。
@@ -163,6 +189,45 @@ ipcMain.handle('recordings:open-folder', async () => {
     return { ok: !err, path: dir, error: err || '' };
 });
 
+// ==================== 后台输出窗口（调试用，超集于请求日志） ====================
+function openBackendWindow() {
+    if (backendWin && !backendWin.isDestroyed()) { backendWin.focus(); return backendWin; }
+    backendWin = new BrowserWindow({
+        width: 860,
+        height: 620,
+        title: '后台输出 · Pigai',
+        autoHideMenuBar: true,
+        webPreferences: {
+            preload: path.join(__dirname, 'backend-preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false
+        }
+    });
+    backendWin.loadFile(path.join(__dirname, '..', 'backend.html'));
+    backendWin.on('closed', () => { backendWin = null; });
+    return backendWin;
+}
+
+ipcMain.handle('backend:open-window', () => { openBackendWindow(); return { ok: true }; });
+ipcMain.handle('backend:get-all', () => backendLog);
+ipcMain.handle('backend:save', async () => {
+    const opts = {
+        title: '保存后台输出',
+        defaultPath: 'pigai-backend-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.txt',
+        filters: [{ name: '文本文件', extensions: ['txt'] }]
+    };
+    const result = (backendWin && !backendWin.isDestroyed())
+        ? await dialog.showSaveDialog(backendWin, opts)
+        : await dialog.showSaveDialog(opts);
+    const { canceled, filePath } = result;
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    const text = backendLog.map(e =>
+        `[${e.time}] [${e.source}·${e.level}] ${e.text}`
+    ).join('\n') + '\n';
+    fs.writeFileSync(filePath, text, 'utf8');
+    return { ok: true, path: filePath };
+});
+
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
@@ -177,7 +242,24 @@ function createWindow() {
             nodeIntegration: false
         }
     });
+    mainWinRef = win;
     win.loadFile(path.join(__dirname, '..', 'index.html'));
+
+    // 捕获渲染层 console（主窗口）：进后台输出，便于调试渲染层报错
+    win.webContents.on('console-message', (...cbArgs) => {
+        const first = cbArgs[0];
+        let level = 'log';
+        let message = '';
+        if (first && typeof first === 'object' && 'message' in first) {
+            level = String(first.level || 'log');
+            message = String(first.message || '');
+        } else {
+            level = typeof cbArgs[1] === 'number' ? (['verbose', 'log', 'warn', 'error'][cbArgs[1]] || 'log') : String(cbArgs[1] || 'log');
+            message = String(cbArgs[2] || '');
+        }
+        if (message.includes('Electron Security Warning')) return;
+        pushBackend({ source: '渲染层', level, text: message });
+    });
 
     // 调试自测钩子：以 APP_SELFTEST=1 启动时，自动验证界面状态与调用链路；
     // 结果同时写入 APP_SELFTEST_OUT 指定的 JSON 文件（发行版 exe 无法捕获控制台时用）
@@ -277,6 +359,16 @@ function createWindow() {
                     report.recordingsDirCreated = fs.existsSync(path.join(app.getPath('userData'), 'recordings'));
                     console.log('SELFTEST RECORDINGS-DIR:', report.recordingsDirCreated);
                     flush();
+                    // 后台输出按钮：点击后应弹出后台输出窗口（含主进程捕获的日志）
+                    await win.webContents.executeJavaScript("document.getElementById('backendOutputBtn').click()");
+                    await new Promise(r => setTimeout(r, 2000));
+                    const backendW = BrowserWindow.getAllWindows().find(w => w !== win && (!logW || w !== logW));
+                    report.backendWindowCount = BrowserWindow.getAllWindows().length;
+                    if (backendW && !backendW.isDestroyed()) {
+                        report.backendText = (await backendW.webContents.executeJavaScript("document.body.innerText")).slice(0, 120);
+                    }
+                    console.log('SELFTEST BACKENDWIN:', JSON.stringify({ count: report.backendWindowCount, text: (report.backendText || '').slice(0, 60) }));
+                    flush();
                     // 麦克风探测：拿到确切错误名 + 实测 RMS 电平
                     // （静音流 RMS 恒为 0，正常采集即使安静环境也有底噪）
                     const micResult = await win.webContents.executeJavaScript(`
@@ -327,6 +419,7 @@ function createWindow() {
     }
     // 主窗口关闭 = 应用退出：同步关闭日志等子窗口（否则子窗口会悬空保活进程）
     win.on('closed', () => {
+        mainWinRef = null;
         if (logWin && !logWin.isDestroyed()) logWin.close();
         app.quit();
     });
@@ -390,6 +483,43 @@ ipcMain.handle('config:save', async (_event, cfg) => {
     persistApiConfig();
     pushLog({ type: '配置', detail: `类型 ${apiConfig.apiType} · 模型 ${apiConfig.model || GLM_PRESET.model}${apiConfig.customUrl ? ' · ' + apiConfig.customUrl : ''} · Key ${maskKey(apiConfig.key)} · 讯飞评测 ${apiConfig.xfAppId ? '已配置(' + apiConfig.xfAppId + ')' : '未配置'}` });
     return { ok: true, keyMasked: maskKey(apiConfig.key), model: apiConfig.model };
+});
+
+// 一键清空：scope 'llm'（大模型 Key/地址/模型）或 'xf'（讯飞 APPID/Key/Secret）
+ipcMain.handle('config:clear', (_event, scope) => {
+    if (scope === 'llm') {
+        apiConfig.key = '';
+        apiConfig.customUrl = '';
+        apiConfig.model = '';
+    } else if (scope === 'xf') {
+        apiConfig.xfAppId = '';
+        apiConfig.xfApiKey = '';
+        apiConfig.xfApiSecret = '';
+    } else {
+        throw new Error('未知清空范围');
+    }
+    persistApiConfig();
+    pushLog({ type: '配置', detail: `已清空 ${scope === 'llm' ? '大模型' : '讯飞'} API 信息` });
+    return { ok: true, displayName: apiDisplayName() };
+});
+
+// 通用文本保存（作文批改 Save 按钮）：系统保存对话框
+ipcMain.handle('text:save', async (_event, payload) => {
+    const { text, defaultName } = payload || {};
+    if (typeof text !== 'string' || !text.trim()) return { ok: false, empty: true };
+    const safeName = String(defaultName || 'pigai-export').replace(/[\\/:*?"<>|]/g, '');
+    const opts = {
+        title: '保存文本',
+        defaultPath: safeName + '.txt',
+        filters: [{ name: '文本文件', extensions: ['txt'] }]
+    };
+    const result = (mainWinRef && !mainWinRef.isDestroyed())
+        ? await dialog.showSaveDialog(mainWinRef, opts)
+        : await dialog.showSaveDialog(opts);
+    const { canceled, filePath } = result;
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(filePath, text, 'utf8');
+    return { ok: true, path: filePath };
 });
 
 // 讯飞语音评测：渲染层把录音转好的 MP3（base64）与朗读内容（refText）送来评测
