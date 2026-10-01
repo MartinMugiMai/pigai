@@ -22,8 +22,12 @@
     // ==================== API 设置弹窗（首次配置 / 随时修改） ====================
     const apiSettingsBtn = document.getElementById('apiSettingsBtn');
     const apiStatusBadge = document.getElementById('apiStatusBadge');
+    const assistantStatusBadge = document.getElementById('assistantStatusBadge');
     const logWindowBtn = document.getElementById('logWindowBtn');
     const recordingsFolderBtn = document.getElementById('recordingsFolderBtn');
+    const backendOutputBtn = document.getElementById('backendOutputBtn');
+    const clearLlmBtn = document.getElementById('clearLlmBtn');
+    const clearXfBtn = document.getElementById('clearXfBtn');
     const apiSetupOverlay = document.getElementById('apiSetupOverlay');
     const apiTypeSelect = document.getElementById('apiTypeSelect');
     const apiKeyInput = document.getElementById('apiKeyInput');
@@ -61,7 +65,11 @@
     }
 
     // 顶部徽章：显示当前所选大模型 API 的识别名；未配置时显示"未启用大模型 API"
+    // llmConfigured 同时驱动作文批改/朗诵批改按钮的可用状态
+    let llmConfigured = false;
+
     function applyApiStatus(status) {
+        llmConfigured = Boolean(status && status.hasKey);
         if (status && status.hasKey && status.displayName) {
             apiStatusBadge.textContent = status.displayName;
             apiStatusBadge.classList.add('enabled');
@@ -69,6 +77,8 @@
             apiStatusBadge.textContent = '未启用大模型 API';
             apiStatusBadge.classList.remove('enabled');
         }
+        updateGenerateBtnState();
+        updateGradeBtnState();
         return status;
     }
 
@@ -93,8 +103,9 @@
             } catch { /* 读取失败则保持空表单 */ }
         }
         apiKeyInput.value = '';
-        keyFileHint.textContent = '支持智谱 key.txt 或纯文本 Key';
+        keyFileHint.textContent = '仅建议智谱 Key 用 TXT 导入';
         toggleCustomFields();
+        updateAssistantStatus();
         apiSetupOverlay.classList.add('visible');
     }
 
@@ -105,6 +116,35 @@
     // 请求日志窗口（Electron 子窗口）；浏览器模式下无日志可看
     logWindowBtn.addEventListener('click', function() {
         if (window.chineseAI) window.chineseAI.openLogWindow();
+    });
+
+    // 后台输出窗口：主进程 print + 渲染层 console 的全部调试输出
+    backendOutputBtn.addEventListener('click', function() {
+        if (window.chineseAI) window.chineseAI.openBackendWindow();
+    });
+
+    // 一键清空大模型 API 信息（Key / 接口地址 / 模型名）
+    clearLlmBtn.addEventListener('click', async function() {
+        if (!window.chineseAI) return;
+        if (!confirm('确认清空大模型 API 信息（Key、接口地址、模型名）？清空后"Generate Review"与"开始批改"将不可用，需重新配置。')) return;
+        try {
+            await window.chineseAI.clearConfig('llm');
+            await openApiSetup();
+        } catch (e) {
+            alert('清空失败：' + (e.message || e));
+        }
+    });
+
+    // 一键清空讯飞语音评测信息（APPID / APIKey / APISecret）
+    clearXfBtn.addEventListener('click', async function() {
+        if (!window.chineseAI) return;
+        if (!confirm('确认清空讯飞语音评测信息（APPID / APIKey / APISecret）？清空后朗诵批改将不含读音测评数据。')) return;
+        try {
+            await window.chineseAI.clearConfig('xf');
+            await openApiSetup();
+        } catch (e) {
+            alert('清空失败：' + (e.message || e));
+        }
     });
 
     // 用资源管理器 / Finder 打开录音目录
@@ -136,34 +176,60 @@
 
     apiSaveBtn.addEventListener('click', async function() {
         const key = apiKeyInput.value.trim();
-        if (!key) {
-            alert('请填写 API Key（或点击"导入 key.txt"自动识别）');
-            return;
-        }
         const isCustom = apiTypeSelect.value === 'custom';
         if (isCustom && !/^https?:\/\//i.test(customUrlInput.value.trim())) {
             alert('自定义接口需要填写以 http(s):// 开头的 API 链接');
             return;
         }
+        // Key 留空 = 沿用已存储的 Key；仅在本地完全没有 Key 时要求填写
+        const cfg = {
+            apiType: apiTypeSelect.value,
+            customUrl: customUrlInput.value.trim(),
+            model: customModelInput.value.trim(),
+            xfAppId: xfAppIdInput.value.trim(),
+            xfApiKey: xfApiKeyInput.value.trim(),
+            xfApiSecret: xfApiSecretInput.value.trim()
+        };
+        if (key) cfg.key = key;
         try {
+            if (!key) {
+                const current = await window.chineseAI.getConfigStatus();
+                if (!current || !current.hasKey) {
+                    alert('请填写 API Key（当前未存储任何 Key）');
+                    return;
+                }
+            }
             apiSaveBtn.disabled = true;
-            await window.chineseAI.saveConfig({
-                apiType: apiTypeSelect.value,
-                key,
-                customUrl: customUrlInput.value.trim(),
-                model: customModelInput.value.trim(),
-                xfAppId: xfAppIdInput.value.trim(),
-                xfApiKey: xfApiKeyInput.value.trim(),
-                xfApiSecret: xfApiSecretInput.value.trim()
-            });
+            await window.chineseAI.saveConfig(cfg);
             closeApiSetup();
-            window.chineseAI.getConfigStatus().then(applyApiStatus).catch(() => {});
+            window.chineseAI.getConfigStatus().then(applyApiStatus).then(updateAssistantStatus).catch(() => {});
         } catch (e) {
             alert('保存失败：' + (e.message || e));
         } finally {
             apiSaveBtn.disabled = false;
         }
     });
+
+    // 讯飞评测 + 麦克风接入状态标签（显示在顶部信息栏）
+    async function updateAssistantStatus() {
+        let micText = '未知';
+        try {
+            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                micText = devices.some(d => d.kind === 'audioinput') ? '已接入' : '未接入';
+            } else {
+                micText = '不支持';
+            }
+        } catch { micText = '未知'; }
+        let xfText = '未配置';
+        if (window.chineseAI) {
+            try {
+                const s = await window.chineseAI.getConfigStatus();
+                xfText = s.xfConfigured ? '已配置' : '未配置';
+            } catch { /* 保持未配置 */ }
+        }
+        if (assistantStatusBadge) assistantStatusBadge.textContent = `讯飞 ${xfText} · 麦克风 ${micText}`;
+    }
 
     // ==================== GLM 接口（Electron 主进程代理） ====================
     // Key 与网络请求全部在主进程（electron/main.js）处理；渲染层通过 preload
@@ -179,6 +245,7 @@
     const outputDiv = document.getElementById('outputContent');
     const generateBtn = document.getElementById('generateBtn');
     const clearBtn = document.getElementById('clearBtn');
+    const saveReviewBtn = document.getElementById('saveReviewBtn');
     const uploadBtn = document.getElementById('uploadBtn');
     const essayFileInput = document.getElementById('essayFile');
     const fileHint = document.getElementById('fileHint');
@@ -267,19 +334,18 @@
             }
         } finally {
             isGenerating = false;
-            generateBtn.disabled = false;
+            updateGenerateBtnState();
         }
     }
 
-    function clearAll() {
-        gradeInput.value = '';
-        titleInput.value = '';
-        minWordsInput.value = '';
-        writingReqInput.value = '';
-        reviewNeedsInput.value = '';
-        essayContentInput.value = '';
-        essayFileInput.value = '';
-        fileHint.textContent = '支持 .txt 文本文件，或直接在下方粘贴';
+    // 大模型 API 未配置时禁用生成按钮（配置入口：右上角 ⚙️ API 设置）
+    function updateGenerateBtnState() {
+        generateBtn.disabled = !llmConfigured && Boolean(window.chineseAI);
+        generateBtn.title = (!llmConfigured && window.chineseAI) ? '请先在 ⚙️ API 设置中配置大模型 API' : '';
+    }
+
+    // Clear：仅清空评价输出文本框（保留左侧批改条件输入）
+    function clearReviewOutput() {
         outputDiv.innerHTML = '';
     }
 
@@ -297,7 +363,38 @@
     });
 
     generateBtn.addEventListener('click', renderReview);
-    clearBtn.addEventListener('click', clearAll);
+    clearBtn.addEventListener('click', clearReviewOutput);
+
+    // Save：将评价输出一键保存为 TXT（评价输出框空白时按钮禁用）
+    saveReviewBtn.addEventListener('click', async function() {
+        const text = outputDiv.innerText;
+        if (!text.trim() || outputDiv.querySelector('.output-placeholder')) return;
+        try {
+            saveReviewBtn.disabled = true;
+            const title = titleInput.value.trim().replace(/[\\/:*?"<>|]/g, '').slice(0, 20);
+            const now = new Date();
+            const p2 = n => String(n).padStart(2, '0');
+            const stamp = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
+            const r = await window.chineseAI.saveTextFile({ text, defaultName: `作文批改-${title || '未命名'}-${stamp}` });
+            if (r.ok) {
+                saveReviewBtn.textContent = '✅ 已保存';
+                setTimeout(() => { saveReviewBtn.textContent = '💾 Save'; }, 2000);
+            } else if (r.canceled) {
+                saveReviewBtn.textContent = '💾 Save';
+            }
+        } catch (e) {
+            alert('保存失败：' + (e.message || e));
+            saveReviewBtn.textContent = '💾 Save';
+        } finally {
+            updateSaveReviewBtnState();
+        }
+    });
+
+    // 评价输出框空白（或仍是占位提示）时禁用 Save 按钮
+    function updateSaveReviewBtnState() {
+        saveReviewBtn.disabled = outputDiv.innerText.trim() === '' || !!outputDiv.querySelector('.output-placeholder');
+    }
+    new MutationObserver(updateSaveReviewBtnState).observe(outputDiv, { childList: true, subtree: true, characterData: true });
 
     document.addEventListener('keydown', function(e) {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -309,7 +406,8 @@
     // 初始状态：输入框与输出框均保持空白（不自动调用接口，等待用户触发）
     outputDiv.innerHTML = '';
 
-    // 首次运行检查：未配置 Key 时自动弹出设置窗口；浏览器模式下隐藏设置按钮
+    // 首次运行检查：未配置 Key 时自动弹出设置窗口；浏览器模式下隐藏桌面专属按钮
+    updateAssistantStatus();
     if (window.chineseAI) {
         window.chineseAI.getConfigStatus().then(status => {
             applyApiStatus(status);
@@ -319,6 +417,7 @@
         apiSettingsBtn.style.display = 'none';
         logWindowBtn.style.display = 'none';
         recordingsFolderBtn.style.display = 'none';
+        backendOutputBtn.style.display = 'none';
     }
 
     // ==================== 朗诵批改逻辑（录音 → 大模型批改） ====================
@@ -741,10 +840,12 @@
         tagContainer.innerHTML = parsed.tags.map(t => `<span style="${tagStyle}">${escapeHtml(t)}</span>`).join('');
     }
 
-    // 朗读内容为必填（讯飞语音测评需参照原文）：空白时批改按钮禁用
+    // 朗读内容为必填（讯飞语音测评需参照原文）：空白时批改按钮禁用；大模型未配置时同样禁用
     function updateGradeBtnState() {
-        gradeBtn.disabled = isGradingRecite || reciteContentInput.value.trim() === '';
-        gradeBtn.title = reciteContentInput.value.trim() === '' ? '请先填写朗读内容' : '';
+        const noApi = !llmConfigured && Boolean(window.chineseAI);
+        gradeBtn.disabled = isGradingRecite || reciteContentInput.value.trim() === '' || noApi;
+        gradeBtn.title = reciteContentInput.value.trim() === '' ? '请先填写朗读内容'
+            : noApi ? '请先在 ⚙️ API 设置中配置大模型 API' : '';
     }
 
     async function gradeRecitation() {

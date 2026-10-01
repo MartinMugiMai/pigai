@@ -20,5 +20,11 @@ contextBridge.exposeInMainWorld('chineseAI', {
     // 保存录音文件到用户数据目录：{ base64, filename } → { ok, path }
     saveRecording: (payload) => ipcRenderer.invoke('recordings:save', payload),
     // 用资源管理器 / Finder 打开录音目录
-    openRecordingsFolder: () => ipcRenderer.invoke('recordings:open-folder')
+    openRecordingsFolder: () => ipcRenderer.invoke('recordings:open-folder'),
+    // 打开（或聚焦）后台输出窗口
+    openBackendWindow: () => ipcRenderer.invoke('backend:open-window'),
+    // 一键清空：scope 'llm'（大模型）| 'xf'（讯飞）
+    clearConfig: (scope) => ipcRenderer.invoke('config:clear', scope),
+    // 保存文本到 TXT：{ text, defaultName } → { ok, path } / { ok:false, canceled }
+    saveTextFile: (payload) => ipcRenderer.invoke('text:save', payload)
 });

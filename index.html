@@ -19,12 +19,12 @@
             <span class="en-sub">Six-Dimension &amp; Recitation</span>
         </div>
         <div class="title-meta">
-            <span>📅 2026.09.02</span>
-            <span>👤 Sally</span>
             <button type="button" class="api-settings-btn" id="apiSettingsBtn" title="配置 API Key 与接口地址">⚙️ API 设置</button>
             <span class="api-status-badge" id="apiStatusBadge">未启用大模型 API</span>
+            <span class="api-status-badge" id="assistantStatusBadge">讯飞 检测中 · 麦克风 检测中</span>
             <button type="button" class="api-settings-btn" id="logWindowBtn" title="查看当前大模型请求日志">📜 请求日志</button>
             <button type="button" class="api-settings-btn" id="recordingsFolderBtn" title="打开录音文件所在目录（资源管理器 / Finder）">📁 录音目录</button>
+            <button type="button" class="api-settings-btn" id="backendOutputBtn" title="打开后台输出窗口（主进程与渲染层全部调试输出）">🖥️ 后台输出</button>
         </div>
     </div>
 
@@ -76,10 +76,11 @@
                     <div class="output-area" id="outputContent">
                         <p class="output-placeholder">✏️ 填写左侧批改条件后，点击 "✨ Generate Review" 或按 Ctrl+Enter 生成评语。</p>
                     </div>
-                    <div class="action-bar">
-                        <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>
-                        <button class="btn btn-primary" id="generateBtn">✨ Generate Review</button>
-                    </div>
+            <div class="action-bar">
+                <button class="btn btn-secondary" id="clearBtn">🗑️ Clear</button>
+                <button class="btn btn-secondary" id="saveReviewBtn" disabled title="将评价内容保存为 TXT">💾 Save</button>
+                <button class="btn btn-primary" id="generateBtn">✨ Generate Review</button>
+            </div>
                     <div class="output-hint">💡 评语基于左侧批改条件生成</div>
                 </div>
             </div>
@@ -187,7 +188,7 @@
                 <div class="upload-row">
                     <button type="button" class="btn btn-secondary" id="importKeyBtn">📥 导入 key.txt</button>
                     <input type="file" id="keyFileInput" accept=".txt,text/plain" hidden />
-                    <span class="file-hint" id="keyFileHint">支持智谱 key.txt 或纯文本 Key</span>
+                    <span class="file-hint" id="keyFileHint">仅建议智谱 Key 用 TXT 导入</span>
                 </div>
                 <div class="key-mask" id="keyMask" style="display: none;"></div>
             </div>
@@ -199,6 +200,9 @@
                 <label>模型名称 <span>可选，留空自动探测</span></label>
                 <input type="text" id="customModelInput" placeholder="留空则自动探测服务端可用模型">
             </div>
+            <div class="modal-actions" style="justify-content: flex-start; margin-top: 0;">
+                <button type="button" class="btn btn-secondary" id="clearLlmBtn" title="清空已存储的大模型 Key、接口地址与模型名">🗑️ 一键清空大模型 API 信息</button>
+            </div>
             <div class="modal-divider">讯飞语音评测（可选 · 用于朗读音频的读音测评，需在讯飞开放平台申请）</div>
             <div class="entry-item">
                 <label>讯飞 APPID <span>Xfyun AppID</span></label>
@@ -206,11 +210,14 @@
             </div>
             <div class="entry-item">
                 <label>讯飞 API Key <span>APIKey</span></label>
-                <input type="password" id="xfApiKeyInput" placeholder="已配置则留空保持不变" autocomplete="off">
+                <input type="text" id="xfApiKeyInput" placeholder="已配置则留空保持不变" autocomplete="off">
             </div>
             <div class="entry-item">
                 <label>讯飞 API Secret <span>APISecret</span></label>
-                <input type="password" id="xfApiSecretInput" placeholder="已配置则留空保持不变" autocomplete="off">
+                <input type="text" id="xfApiSecretInput" placeholder="已配置则留空保持不变" autocomplete="off">
+            </div>
+            <div class="modal-actions" style="justify-content: flex-start; margin-top: 0;">
+                <button type="button" class="btn btn-secondary" id="clearXfBtn" title="清空已存储的讯飞 APPID / APIKey / APISecret">🗑️ 一键清空讯飞信息</button>
             </div>
         </div>
         <div class="modal-actions">
