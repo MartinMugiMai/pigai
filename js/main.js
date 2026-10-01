@@ -492,6 +492,8 @@
 
     const voiceRecordBtn = document.getElementById('voiceRecordBtn');
     const voiceStopBtn = document.getElementById('voiceStopBtn');
+    const volumeMeter = document.getElementById('volumeMeter');
+    const volumeBar = document.getElementById('volumeBar');
     const audioUploadBtn = document.getElementById('audioUploadBtn');
     const audioFileInput = document.getElementById('audioFileInput');
     const voiceStatus = document.getElementById('voiceStatus');
@@ -506,6 +508,22 @@
     let recordingStartTime = null;
     let lastRecordingSeconds = 0; // 最近一次录音时长（秒）
     let isGradingRecite = false;
+    let volumeDisplay = 0;        // 音量条当前显示百分比（带平滑回落）
+
+    // 实时音量：分片 RMS → 显示百分比（约 0.25 RMS 即满格），带平滑回落
+    function applyVolumeLevel(rms) {
+        const pct = Math.min(100, Math.round(rms * 400));
+        volumeDisplay = Math.max(pct, Math.round(volumeDisplay * 0.8));
+        volumeBar.style.width = volumeDisplay + '%';
+        volumeBar.classList.toggle('warm', volumeDisplay >= 45 && volumeDisplay < 75);
+        volumeBar.classList.toggle('hot', volumeDisplay >= 75);
+    }
+
+    function hideVolumeMeter() {
+        volumeMeter.hidden = true;
+        volumeBar.style.width = '0%';
+        volumeDisplay = 0;
+    }
 
     // ==================== 麦克风原始 PCM 采集（Web Audio → WAV） ====================
     // 不使用 MediaRecorder(webm/opus)：Electron 在 macOS 上常产出"文件正常但内容
@@ -556,7 +574,16 @@
                 const sampleRate = ctx.sampleRate;
                 const source = ctx.createMediaStreamSource(stream);
                 const chunks = [];
-                const onChunk = data => chunks.push(new Float32Array(data));
+                let onLevel = null; // 实时音量回调（由调用方注入，参数为当前分片 RMS）
+                const onChunk = data => {
+                    const samples = new Float32Array(data);
+                    chunks.push(samples);
+                    if (onLevel) {
+                        let sum = 0;
+                        for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+                        onLevel(Math.sqrt(sum / Math.max(1, samples.length)));
+                    }
+                };
                 let worklet = null, processor = null, sink = null;
                 try {
                     const url = URL.createObjectURL(new Blob([WORKLET_SRC], { type: 'application/javascript' }));
@@ -576,6 +603,7 @@
                     sink.connect(ctx.destination);
                 }
                 return {
+                    set onLevel(cb) { onLevel = cb; },
                     async stop() {
                         try { source.disconnect(); } catch (e) {}
                         try { worklet && worklet.disconnect(); } catch (e) {}
@@ -593,6 +621,7 @@
     async function startRecording() {
         try {
             micRecorder = await MicRecorder.start();
+            micRecorder.onLevel = applyVolumeLevel; // 实时音量回调
             isRecording = true;
             recordingStartTime = Date.now();
             pulseDot.classList.add('active');
@@ -602,6 +631,8 @@
             voiceRecordBtn.classList.add('recording');
             voiceStopBtn.disabled = false;
             voiceRecordBtn.disabled = true;
+            volumeMeter.hidden = false; // 仅录音中显示音量条
+            volumeBar.style.width = '0%';
         } catch (err) {
             const name = err && err.name ? err.name : 'UnknownError';
             console.error('Recording error:', name, err && err.message);
@@ -621,6 +652,7 @@
         if (recorder && isRecording) {
             micRecorder = null;
             isRecording = false;
+            hideVolumeMeter(); // 停止后隐藏音量条
             voiceStopBtn.disabled = true;
             voiceRecordBtn.disabled = true;
             try {
@@ -667,6 +699,7 @@
             voiceStatus.textContent = '点击 🎤 开始录音';
             voiceDetail.textContent = '⏳ 未录音';
         }
+        hideVolumeMeter();
     }
 
     voiceRecordBtn.addEventListener('click', function(e) {
