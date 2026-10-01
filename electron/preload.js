@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('chineseAI', {
     openRecordingsFolder: () => ipcRenderer.invoke('recordings:open-folder'),
     // 打开（或聚焦）后台输出窗口
     openBackendWindow: () => ipcRenderer.invoke('backend:open-window'),
+    // 热切换大模型接口（另一接口已配置时）：返回切换后的双档案状态
+    switchApi: () => ipcRenderer.invoke('config:switch'),
     // 一键清空：scope 'llm'（大模型）| 'xf'（讯飞）
     clearConfig: (scope) => ipcRenderer.invoke('config:clear', scope),
     // 保存文本到 TXT：{ text, defaultName } → { ok, path } / { ok:false, canceled }
