@@ -3,7 +3,7 @@
   "productName": "Pigai",
   "version": "1.0.6",
   "description": "语文学习 AI 助手：作文批改 + 古诗背诵默写（Electron 桌面版）",
-  "author": "Martin",
+  "author": "Team Chill Cup",
   "license": "MIT",
   "main": "electron/main.js",
   "scripts": {
@@ -32,8 +32,7 @@
       "css/**/*",
       "js/**/*",
       "electron/**/*"
-    ],
-    "mac": {
+    ],    "mac": {
       "target": [
         "dmg"
       ],

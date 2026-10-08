@@ -7,6 +7,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />
   <title>Chinese Learning AI Assistant</title>
   <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/themes.css" />
 </head>
 <body>
 <div class="scroll-container">
@@ -26,6 +27,8 @@
             <button type="button" class="api-settings-btn" id="logWindowBtn" title="查看当前大模型请求日志">📜 请求日志</button>
             <button type="button" class="api-settings-btn" id="recordingsFolderBtn" title="打开录音文件所在目录（资源管理器 / Finder）">📁 录音目录</button>
             <button type="button" class="api-settings-btn" id="backendOutputBtn" title="打开后台输出窗口（主进程与渲染层全部调试输出）">🖥️ 后台输出</button>
+            <button type="button" class="api-settings-btn" id="skinSettingsBtn" title="切换界面皮肤风格">🎨 皮肤修改</button>
+            <button type="button" class="api-settings-btn" id="aboutBtn" title="关于本应用">ℹ️ 关于本App</button>
         </div>
     </div>
 
@@ -232,7 +235,41 @@
     </div>
 </div>
 
-  <script src="node_modules/lamejs/lame.min.js"></script>
+  <!-- 皮肤切换弹窗（与 API 设置弹窗同款样式；点击主题立即生效并返回页面） -->
+<div class="modal-overlay" id="skinSetupOverlay">
+    <div class="modal-dialog">
+        <div class="modal-title">🎨 皮肤修改</div>
+        <div class="modal-body">
+            <div class="theme-grid">
+                <button type="button" class="theme-option active" data-theme="classic">
+                    <span class="theme-swatch"><i style="background:#faf6f0"></i><i style="background:#c9b7a4"></i><i style="background:#3d2e1f"></i></span>
+                    <span class="theme-name">语文古典</span>
+                    <span class="theme-desc">默认 · 卷轴质感</span>
+                </button>
+                <button type="button" class="theme-option" data-theme="cute">
+                    <span class="theme-swatch"><i style="background:#fff0f6"></i><i style="background:#ff9ec7"></i><i style="background:#b48fd9"></i></span>
+                    <span class="theme-name">可爱风格</span>
+                    <span class="theme-desc">粉彩 · 圆润</span>
+                </button>
+                <button type="button" class="theme-option" data-theme="tech">
+                    <span class="theme-swatch"><i style="background:#0f172a"></i><i style="background:#38bdf8"></i><i style="background:#1e293b"></i></span>
+                    <span class="theme-name">科技风格</span>
+                    <span class="theme-desc">深色 · 极客</span>
+                </button>
+                <button type="button" class="theme-option" data-theme="toy">
+                    <span class="theme-swatch"><i style="background:#fff8e7"></i><i style="background:#ff6b35"></i><i style="background:#2f9e44"></i></span>
+                    <span class="theme-name">儿童玩具</span>
+                    <span class="theme-desc">糖果 · 活泼</span>
+                </button>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="skinCloseBtn">关闭</button>
+        </div>
+    </div>
+</div>
+
+<script src="node_modules/lamejs/lame.min.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

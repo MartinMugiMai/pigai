@@ -73,6 +73,13 @@ const GLM_PRESET = {
     model: 'glm-5.3-flash' // 当前最新免费档模型（推理模型，回复带思考过程）
 };
 
+// 关于面板信息（macOS 原生关于菜单 + Windows 关于弹窗共用）
+app.setAboutPanelOptions({
+    applicationName: 'Pigai · 语文学习 AI 助手',
+    applicationVersion: app.getVersion(),
+    credits: '制作：Team Chill Cup\n作文批改（大模型）+ 朗诵批改（语音评测）'
+});
+
 // ==================== API 配置（两套接口独立存储，互不干扰） ====================
 // profiles.glm    ：GLM 官方（Key）
 // profiles.custom ：自定义接口（Key / 地址 / 模型名）
@@ -650,6 +657,30 @@ ipcMain.handle('config:clear', (_event, scope) => {
     persistApiConfig();
     pushLog({ type: '配置', detail: `已清空 ${scope === 'glm' ? 'GLM 官方' : scope === 'custom' ? '自定义接口' : '讯飞'} API 信息` });
     return buildStatus();
+});
+
+// 关于本应用：全平台统一弹窗（Windows 无原生关于菜单，macOS 亦可用）
+ipcMain.handle('app:about', async () => {
+    const lines = [
+        'Pigai · 语文学习 AI 助手',
+        `版本 ${app.getVersion()}`,
+        '',
+        '制作：Team Chill Cup',
+        '',
+        '功能：作文批改（大模型）+ 朗诵批改（讯飞语音评测）',
+        `运行环境：Electron ${process.versions.electron} · Chromium ${process.versions.chrome}`
+    ].join('\n');
+    const result = (mainWinRef && !mainWinRef.isDestroyed())
+        ? await dialog.showMessageBox(mainWinRef, {
+            type: 'info',
+            title: '关于本应用',
+            message: 'Pigai · 语文学习 AI 助手',
+            detail: lines,
+            buttons: ['确定'],
+            icon: undefined
+        })
+        : null;
+    return { ok: true };
 });
 
 // 通用文本保存（作文批改 Save 按钮）：系统保存对话框

@@ -27,6 +27,10 @@
     const logWindowBtn = document.getElementById('logWindowBtn');
     const recordingsFolderBtn = document.getElementById('recordingsFolderBtn');
     const backendOutputBtn = document.getElementById('backendOutputBtn');
+    const skinSettingsBtn = document.getElementById('skinSettingsBtn');
+    const aboutBtn = document.getElementById('aboutBtn');
+    const skinSetupOverlay = document.getElementById('skinSetupOverlay');
+    const skinCloseBtn = document.getElementById('skinCloseBtn');
     const clearLlmBtn = document.getElementById('clearLlmBtn');
     const clearXfBtn = document.getElementById('clearXfBtn');
     const apiSetupOverlay = document.getElementById('apiSetupOverlay');
@@ -159,6 +163,40 @@
     backendOutputBtn.addEventListener('click', function() {
         if (window.chineseAI) window.chineseAI.openBackendWindow();
     });
+
+    // ==================== 关于本应用 ====================
+    aboutBtn.addEventListener('click', function() {
+        if (window.chineseAI) window.chineseAI.showAboutDialog();
+    });
+
+    // ==================== 皮肤切换（四风格，即时生效并记忆） ====================
+    const THEME_KEY = 'pigai-theme';
+
+    function applyTheme(theme) {
+        const valid = ['classic', 'cute', 'tech', 'toy'];
+        const t = valid.includes(theme) ? theme : 'classic';
+        document.body.dataset.theme = t;
+        localStorage.setItem(THEME_KEY, t);
+        document.querySelectorAll('.theme-option').forEach(opt => {
+            opt.classList.toggle('active', opt.dataset.theme === t);
+        });
+    }
+
+    skinSettingsBtn.addEventListener('click', function() {
+        applyTheme(localStorage.getItem(THEME_KEY) || 'classic'); // 打开时高亮当前皮肤
+        skinSetupOverlay.classList.add('visible');
+    });
+    skinCloseBtn.addEventListener('click', () => skinSetupOverlay.classList.remove('visible'));
+
+    document.querySelectorAll('.theme-option').forEach(opt => {
+        opt.addEventListener('click', function() {
+            applyTheme(this.dataset.theme); // 立即生效并记忆
+            skinSetupOverlay.classList.remove('visible'); // 返回原页面
+        });
+    });
+
+    // 启动时应用记忆的皮肤
+    applyTheme(localStorage.getItem(THEME_KEY) || 'classic');
 
     // 一键清空当前所选接口的 API 信息（互不影响另一接口）
     clearLlmBtn.addEventListener('click', async function() {
