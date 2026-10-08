@@ -58,6 +58,12 @@ body[data-theme="cute"] .voice-row { background: #fff0f7; border-color: #ffd0e4;
 body[data-theme="cute"] .status-text { background: #ffe3f0; color: #b04a7e; }
 body[data-theme="cute"] .volume-meter { background: #ffe3f0; border-color: #ffb1d4; }
 body[data-theme="cute"] .toast { background: #d63384; color: #fff; }
+body[data-theme="cute"] .scroll-container::before,
+body[data-theme="cute"] .scroll-container::after {
+    background: linear-gradient(to right, #ff9ec7, #ffd6e8, #ff9ec7);
+    box-shadow: inset 0 2px 6px #ff85b3, 0 4px 10px rgba(214, 51, 132, 0.2);
+    opacity: 0.85;
+}
 
 /* ==================== 科技风格（深色极客） ==================== */
 body[data-theme="tech"] {
@@ -124,6 +130,12 @@ body[data-theme="tech"] .volume-bar.warm { background: #fbbf24; }
 body[data-theme="tech"] .volume-bar.hot { background: #f87171; }
 body[data-theme="tech"] .assess-placeholder { background: #0d1626; border-color: #27405e; color: #7dd3fc; }
 body[data-theme="tech"] .toast { background: #0ea5e9; color: #04121f; }
+body[data-theme="tech"] .scroll-container::before,
+body[data-theme="tech"] .scroll-container::after {
+    background: linear-gradient(to right, #101a2e, #2b4a70, #101a2e);
+    box-shadow: inset 0 2px 6px #0b1424, 0 0 14px rgba(56, 189, 248, 0.35);
+    opacity: 1;
+}
 
 /* ==================== 儿童玩具风格（糖果活泼） ==================== */
 body[data-theme="toy"] {
@@ -179,6 +191,12 @@ body[data-theme="toy"] .voice-row { background: #fff8e7; border-color: #ffe08a; 
 body[data-theme="toy"] .status-text { background: #fff1c9; color: #8a5a00; }
 body[data-theme="toy"] .volume-meter { background: #fff1c9; border: 3px solid #ffd23f; }
 body[data-theme="toy"] .toast { background: #ff6b35; color: #fff; box-shadow: 0 6px 0 #d94f1e; }
+body[data-theme="toy"] .scroll-container::before,
+body[data-theme="toy"] .scroll-container::after {
+    background: linear-gradient(to right, #ffd23f, #ffe08a, #ffd23f);
+    box-shadow: inset 0 2px 6px #ff9f1c, 0 4px 0 rgba(255, 107, 53, 0.35);
+    opacity: 1;
+}
 
 /* ==================== 主题选择卡片（皮肤弹窗内） ==================== */
 .theme-grid {
